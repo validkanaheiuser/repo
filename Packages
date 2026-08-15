@@ -17,16 +17,16 @@ Name: Remote
 Sileodepiction: https://kiiimrepo.com/repo/SileoDepic.php?info=Remote_1.5.3-2_iphoneos-arm64e
 
 Package: com.nvfrk.rh.iOSAutomate
-Version: 1.5.3-19+debug
+Version: 1.5.3-20+poc
 Architecture: iphoneos-arm64e
 Maintainer: fn
 Installed-Size: 5832
 Depends: ellekit, rootless-compat, zip, unzip, ldid, oldabi
-Filename: pool/main/iphoneos-arm64e/com.fn.rh.iOSAutomate_poc-1.5.3-19-debug-roothide-iphoneos-arm64e.deb
-Size: 2488974
-MD5sum: 4bb752a77a75b18da260234b88e16220
-SHA1: c70acdb6446ac7b4f096e96ce45db0b3591b416c
-SHA256: 8111f402278ee123a8f43f2108911951b3ecc7f1531904c4b337201becf072f6
+Filename: pool/main/iphoneos-arm64e/com.fn.rh.iOSAutomate_poc-1.5.3-20-roothide-iphoneos-arm64e.deb
+Size: 2488994
+MD5sum: 84f8912046dbc9465330d377e1157d5c
+SHA1: 1c5a25ca6df2e987682d10c1bf742371c982d6b2
+SHA256: 0cf853d11df9792e577190f421db2e17675397e2fbc330eb89e56a39bf89bf63
 Section: roothide
 Description: Simple and optimized!
  All in ~1 MB file size and ~3 MB on disk.
@@ -192,3 +192,4 @@ Depiction: https://kiiimrepo.com/repo/SileoDepic.php?info=iOSAutomateEcosystem_1
 Name: iOSAutomateEcosystem
 Sileodepiction: https://kiiimrepo.com/repo/SileoDepic.php?info=iOSAutomateEcosystem_1.0.8-2_iphoneos-arm64
 
+dpkg-scanpackages: info: Wrote 6 entries to output Packages file.
