@@ -17,16 +17,16 @@ Name: Remote
 Sileodepiction: https://kiiimrepo.com/repo/SileoDepic.php?info=Remote_1.5.3-2_iphoneos-arm64e
 
 Package: com.nvfrk.rh.iOSAutomate
-Version: 1.5.3-20+poc
+Version: 1.5.3-21+poc
 Architecture: iphoneos-arm64e
 Maintainer: fn
 Installed-Size: 5832
 Depends: ellekit, rootless-compat, zip, unzip, ldid, oldabi
-Filename: pool/main/iphoneos-arm64e/com.fn.rh.iOSAutomate_poc-1.5.3-20-roothide-iphoneos-arm64e.deb
-Size: 2488994
-MD5sum: 84f8912046dbc9465330d377e1157d5c
-SHA1: 1c5a25ca6df2e987682d10c1bf742371c982d6b2
-SHA256: 0cf853d11df9792e577190f421db2e17675397e2fbc330eb89e56a39bf89bf63
+Filename: pool/main/iphoneos-arm64e/com.fn.rh.iOSAutomate_poc-1.5.3-21-roothide-iphoneos-arm64e.deb
+Size: 2486892
+MD5sum: e0ac6dd075ab94a7bb6ea59a114203e4
+SHA1: 69b3410d24ec17402e81bd998aa6e24691af46cb
+SHA256: 8fa9c932fb00b8810c5170e277409bce5dbd55cb576fc8bc37f9cda6429e729d
 Section: roothide
 Description: Simple and optimized!
  All in ~1 MB file size and ~3 MB on disk.
