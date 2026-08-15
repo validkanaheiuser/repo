@@ -1,14 +1,14 @@
 Package: com.nvfrk.rh.Remote
-Version: 1.5.3-2-roothide+poc
+Version: 1.5.3-3-roothide+poc
 Architecture: iphoneos-arm64e
 Maintainer: fn
 Installed-Size: 1796
 Depends: ellekit, rootless-compat, oldabi
-Filename: pool/main/iphoneos-arm64e/com.fn.rh.Remote_poc-1.5.3-2-roothide-iphoneos-arm64e.deb
-Size: 703332
-MD5sum: bbd2a9f33b96dd4aa162fa883a50d24f
-SHA1: 2b5842c6875f2793b1b52b7e5442e14c117e9860
-SHA256: 5a0c09bbf9f93d2998352d96858b5c8f8682c660d01acb9d54bf554d666c7f3c
+Filename: pool/main/iphoneos-arm64e/com.fn.rh.Remote_poc-1.5.3-3-roothide-iphoneos-arm64e.deb
+Size: 703334
+MD5sum: c174b22d09a097a1b52f57f166e6b3af
+SHA1: cf5db6fe8f34f7ea8c3d73cea73d7486475f6113
+SHA256: 9fbbccefe57a83ce96014645fa9f6c62172f3a3d6b4eee8ec43ec8c1680f552e
 Section: roothide
 Description: fn [PoC]
 Author: nvfrk
@@ -17,16 +17,16 @@ Name: Remote
 Sileodepiction: https://kiiimrepo.com/repo/SileoDepic.php?info=Remote_1.5.3-2_iphoneos-arm64e
 
 Package: com.nvfrk.rh.iOSAutomate
-Version: 1.5.3-22+poc
+Version: 1.5.3-23+poc
 Architecture: iphoneos-arm64e
 Maintainer: fn
 Installed-Size: 5832
 Depends: ellekit, rootless-compat, zip, unzip, ldid, oldabi
-Filename: pool/main/iphoneos-arm64e/com.fn.rh.iOSAutomate_poc-1.5.3-22-roothide-iphoneos-arm64e.deb
-Size: 2488990
-MD5sum: 8822d7f5c1ab7b037e1f518a95fe2733
-SHA1: ca9d1e124227a39de209e62e0251102942bec31f
-SHA256: 8aa46200a88c3c3180240b88f96fc3a7b47d87916a16f0fa5731e7db94243723
+Filename: pool/main/iphoneos-arm64e/com.fn.rh.iOSAutomate_poc-1.5.3-23-roothide-iphoneos-arm64e.deb
+Size: 2488992
+MD5sum: 2abf26558b162079fe777edc85018fa5
+SHA1: 1f62811ce23eecd3c3d233465c0e162bb0fa8381
+SHA256: ec7cea9c59832998d695b1a7517c5af93149323afcf87e79a7a61993d15054f0
 Section: roothide
 Description: Simple and optimized!
  All in ~1 MB file size and ~3 MB on disk.
@@ -94,6 +94,7 @@ Author: nvfrk
 Depiction: https://kiiimrepo.com/repo/SileoDepic.php?info=iOSAutomateEcosystem_1.0.8-1_iphoneos-arm64e
 Name: iOSAutomateEcosystem
 Sileodepiction: https://kiiimrepo.com/repo/SileoDepic.php?info=iOSAutomateEcosystem_1.0.8-1_iphoneos-arm64e
+
 
 Package: com.nvfrk.rl.Remote
 Version: 1.5.3-3-rootless+poc
@@ -192,4 +193,3 @@ Depiction: https://kiiimrepo.com/repo/SileoDepic.php?info=iOSAutomateEcosystem_1
 Name: iOSAutomateEcosystem
 Sileodepiction: https://kiiimrepo.com/repo/SileoDepic.php?info=iOSAutomateEcosystem_1.0.8-2_iphoneos-arm64
 
-dpkg-scanpackages: info: Wrote 6 entries to output Packages file.
