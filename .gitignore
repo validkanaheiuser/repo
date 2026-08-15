@@ -1,2 +1,4 @@
 *.deb
 *.DS_Store
+
+!poc/*.deb
