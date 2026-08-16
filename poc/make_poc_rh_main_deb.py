@@ -25,7 +25,7 @@ except ImportError:
     HAVE_ZST = False
 
 SOURCE_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate-1.5.3-3-roothide-iphoneos-arm64e.deb"
-OUTPUT_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate_poc-1.5.3-38-roothide-iphoneos-arm64e.deb"
+OUTPUT_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate_poc-1.5.3-39-roothide-iphoneos-arm64e.deb"
 
 PACIBSP = bytes.fromhex("7f2303d5")
 
@@ -76,6 +76,14 @@ ARM64E_SLICE_OFF = 0x2A8000  # FAT offset where arm64e slice begins
 #   FAT+0x2AF914: 04 00 00 94  (BL vmaddr 0x7924 = IOHIDEventSystemClient, in sub_78FC 1s timer)
 #   FAT+0x2AFAB0: 9d ff ff 97  (BL vmaddr 0x7924 = IOHIDEventSystemClient, in sub_7A98 3s timer)
 PATCHES = [
+    # v1.5.3-39 — globally disable toast dispatch. The v38 caller-specific NOPs did not
+    # stop SpringBoard-2026-08-16-192757.ips: SpringBoard lived only ~22 seconds yet the
+    # crashing main-thread stack contained 501 nested _dispatch_call_block_and_release
+    # frames, with the sole tweak frame at sub_F2EC+0x21F4 (0x114E0), immediately after
+    # objc_autoreleasePoolPop. _ws_show_toast always dispatch_async(main, sub_F2EC), and
+    # it has many callers, so patching more individual producers would be speculative.
+    # Preserve PACIBSP at 0xF1F8 and replace verified SUB SP,SP,#0x80 at +4 with RETAB.
+    (0x2B71FC, bytes.fromhex("FF0F5FD6"), "arm64e _ws_show_toast 0xF1FC RETAB: globally prevent sub_F2EC main-queue accumulation [v1.5.3-39]"),
     # ARM64 — all 5 license bypass patches (no PACIBSP, plain RET)
     (0x1069DC, bytes.fromhex("20028052C0035FD6"), "arm64  offline_PBKDF2  _ws_3c03af885e89f55e -> MOV W0,#17; RET"),
     (0x11E21C, bytes.fromhex("20008052C0035FD6"), "arm64  lc_verify       sub_11A21C          -> MOV W0,#1;  RET"),
@@ -1164,7 +1172,7 @@ def main():
         lines = []
         for line in c_fd[ctrl_key].decode().splitlines():
             if line.startswith("Version:"):
-                lines.append("Version: 1.5.3-38+poc")
+                lines.append("Version: 1.5.3-39+poc")
             elif line.startswith("Depends:"):
                 val = line.rstrip()
                 if "oldabi" not in val:
@@ -1173,7 +1181,7 @@ def main():
             else:
                 lines.append(line)
         c_over[ctrl_key] = ("\n".join(lines) + "\n").encode()
-        print("Updated control: Version 1.5.3-38+poc, oldabi in Depends, postinst original")
+        print("Updated control: Version 1.5.3-39+poc, oldabi in Depends, postinst original")
     # postinst: keep original; signing is done in-patcher by _resign_slice (Python SHA-256)
 
     new_ctrl_tar = write_tar_gz(c_mem, c_fd, c_over)
