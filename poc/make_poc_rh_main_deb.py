@@ -25,7 +25,7 @@ except ImportError:
     HAVE_ZST = False
 
 SOURCE_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate-1.5.3-3-roothide-iphoneos-arm64e.deb"
-OUTPUT_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate_poc-1.5.3-36-roothide-iphoneos-arm64e.deb"
+OUTPUT_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate_poc-1.5.3-37-roothide-iphoneos-arm64e.deb"
 
 PACIBSP = bytes.fromhex("7f2303d5")
 
@@ -647,86 +647,37 @@ PATCHES = [
     # PATCH C1 — NOP BL _luaC_step at 0x166BFC in sub_166B78 (luaD_call preamble)
     (0x40EBFC, bytes.fromhex("1F2003D5"), "arm64e 0x166BFC NOP BL _luaC_step: partial fix — prevents sub_166B78 from triggering GC cycle during C-function dispatch setup (only when GCdebt>0 AND used_slots<=20); primary BLRAAZ recursion at 0x166CB4 needs further investigation [v1.5.3-35]"),
 
-    # ── v1.5.3-36 PATCHES ─────────────────────────────────────────────────────────────────────
+    # ── v1.5.3-37 PATCHES ─────────────────────────────────────────────────────────────────────
     #
-    # ROOT CAUSE of SIGBUS crash (Thread 582846, 509× sub_166B78 recursion):
+    # REVERT F1+F2 (v1.5.3-36 regression): v1.5.3-36's trampoline was built on a false
+    # premise — "luaD_correctstack confirmed absent". It is NOT absent. luaD_reallocstack
+    # (0x1659FC) implements the equivalent via:
+    #   sub_165B28 (0x165B28): converts L->top, L+0x40, ci->func, ci->top, upval->v to
+    #                           relative offsets (subtract L->stack) BEFORE luaM_realloc.
+    #   sub_165C0C (0x165C0C): restores all to absolute (add new L->stack) AFTER realloc.
+    # sub_165C0C walks the full ci chain and does `*j += result[6]` (ci->func += L->stack)
+    # for EVERY CallInfo, including v6->func. This is the correctstack the code was missing.
     #
-    # sub_166B78 (luaD_callT, C-function dispatcher) creates a new CallInfo v6 via
-    # sub_1670B4 with v6->func = v10 (a TValue* pointer into L->stack). After storing
-    # v6->func, it calls the C function via BLRAAZ X8. If that C function calls back
-    # into Lua (lua_call), a nested sub_166B78 may run luaD_growstack, which reallocs
-    # L->stack to a new address. WITHOUT luaD_correctstack (confirmed absent from this
-    # binary via find_regex), the outer frame's v6->func still points into the OLD
-    # (now freed/remapped) L->stack. The outer luaD_poscall(L, v6, v7) then calls
-    # sub_1665B8(L, *v6, ...) which writes the result to the stale address → SIGBUS
-    # (KERN_PROTECTION_FAILURE on arm64e).
+    # The F1 trampoline detected stack move (delta = new_stack - old_stack) and added delta
+    # to v6->func — but sub_165C0C already added delta to v6->func. Double application:
+    # v6->func = (original + delta) + delta = original + 2×delta = garbage address.
+    # luaD_poscall wrote results to the wrong stack slot → TValue corrupted (gc=NULL but
+    # type byte had GC bit 0x40 set) → GC traversethread (sub_16C408+0x9C) dereferenced
+    # NULL+9=0x9 → KERN_INVALID_ADDRESS crash (v1.5.3-36 regression confirmed from
+    # SpringBoard-2026-08-16-173613.ips: EXC_BAD_ACCESS at 0x0000000000000009, Thread 25).
     #
-    # FIX: Stale-pointer fixup trampoline at free space vmaddr 0x1ADC2C (end of __text,
-    # 508 zero bytes confirmed by IDA). Redirect 0x166CAC (the LDR X8,[SP,#0x20] that
-    # loads the fn ptr immediately before BLRAAZ) to trampoline via B. The trampoline
-    # re-executes those same instructions but additionally saves L->stack (L+0x30) to
-    # var_38 ([SP+8], confirmed free after the growstack branch at 0x166C24) before
-    # BLRAAZ, then after BLRAAZ compares saved vs current L->stack. If moved, computes
-    # delta = new_stack - old_stack and adds it to v6->func (at [X1+0]) before calling
-    # luaD_poscall, preventing the stale-pointer write.
-    #
-    # Trampoline register usage: X8=fn ptr, X9=old/new stack, X10=new stack, X11=delta,
-    # X12=v6->func (corrected). All caller-saved; sub_166B78 is a callee (its own
-    # epilogue at 0x166CCC restores callee-saved regs). X0=L, X1=v6, X2=v7 per ABI.
-    #
-    # Trampoline placed at vmaddr 0x1B7798 in __const (FAT+0x45F798).
-    # Location confirmed: 136 bytes of zeros = alignment padding between a byte-value table
-    # (ending 0x1B7797) and a uint32 table (starting 0x1B7820, 16-byte aligned). Never read.
-    # All sections in __TEXT have VM_PROT_READ|VM_PROT_EXECUTE; plain B can reach +330KB ✓.
-    #
-    # T = 0x1B7798; all branch targets recalculated from new T:
-    # BL luaD_poscall from T+0x44=0x1B77DC: target 0x1663A0
-    #   offset = (0x1663A0 - 0x1B77DC)/4 = -332860/4 = -83215 = -0x1450F
-    #   imm26  = 0x4000000 - 0x1450F = 0x3FEBAF1 → F1 BA FE 97
-    # B 0x166CCC (epilogue) from T+0x48=0x1B77E0:
-    #   offset = (0x166CCC - 0x1B77E0)/4 = -330516/4 = -82629 = -0x142C5
-    #   imm26  = 0x4000000 - 0x142C5 = 0x3FEBD3B → 3B D3 FE 17
-    # B 0x1B7798 (trampoline) from 0x166CAC:
-    #   offset = (0x1B7798 - 0x166CAC)/4 = 330476/4 = 82619 = 0x142BB
-    #   imm26  = 0x142BB → BB 42 01 14
-    #
-    # PATCH F1: 76-byte trampoline at vmaddr 0x1B7798 in __const (FAT+0x45F798)
-    (0x45F798, bytes.fromhex(
-        "e81340f9"  # LDR X8,[SP,#0x20]      fn ptr (was 166cac)
-        "a0835ff8"  # LDUR X0,[X29,#-8]      L (was 166cb0)
-        "091840f9"  # LDR X9,[X0,#0x30]      X9 = L->stack (save before BLRAAZ)
-        "e90700f9"  # STR X9,[SP,#8]         save to var_38 (free slot after 0x166C24)
-        "1f093fd6"  # BLRAAZ X8              call C function (was 166cb4)
-        "e01f00b9"  # STR W0,[SP,#0x1c]      save result (was 166cb8)
-        "a0835ff8"  # LDUR X0,[X29,#-8]      L (was 166cbc)
-        "e10b40f9"  # LDR X1,[SP,#0x10]      v6 (was 166cc0)
-        "e21f40b9"  # LDR W2,[SP,#0x1c]      v7 (was 166cc4)
-        "e90740f9"  # LDR X9,[SP,#8]         reload old_stack
-        "0a1840f9"  # LDR X10,[X0,#0x30]     current L->stack
-        "3f010aeb"  # CMP X9,X10             same stack?
-        "a0000054"  # B.EQ +5instrs          skip fixup if stack unchanged
-        "4b0109cb"  # SUB X11,X10,X9         delta = new_stack - old_stack
-        "2c0040f9"  # LDR X12,[X1]           v6->func (stale TValue* into old stack)
-        "8c010b8b"  # ADD X12,X12,X11        corrected func ptr
-        "2c0000f9"  # STR X12,[X1]           update v6->func in CallInfo
-        "f1bafe97"  # BL 0x1663A0            call luaD_poscall(L, v6, v7)
-        "3bd3fe17"  # B 0x166CCC             return to sub_166B78 epilogue
-    ), "arm64e 0x1B7798 trampoline in __const padding: save L->stack before BLRAAZ, fixup stale v6->func if luaD_growstack relocated stack, call luaD_poscall, return to epilogue — fixes SIGBUS from missing luaD_correctstack [v1.5.3-36]"),
-
-    # PATCH F2: redirect 0x166CAC (LDR X8,[SP,#0x20]) → B 0x1B7798 (trampoline)
-    (0x40ECAC, bytes.fromhex("bb420114"), "arm64e 0x166CAC B 0x1B7798: redirect C-function dispatch to fixup trampoline in __const; trampoline re-executes LDR+LDUR then BLRAAZ with stack-fixup guard [v1.5.3-36]"),
 
     # PATCH E1: sub_167504 nCcalls soft threshold 200 → 50 (CMP W8,#0xC8 → CMP W8,#0x32)
     # Encoding: CMP Wn,#imm12 = SUBS WZR,Wn,#imm = 0x7100001F | (imm<<10) | (Rn<<5) | 31
     # #0x32<<10 = 0xC800; Rn=W8=8: 0x7100001F | 0xC800 | 0x100 = 0x7100C91F → 1F C9 00 71
-    (0x40F504, bytes.fromhex("1FC90071"), "arm64e 0x167504 CMP W8,#0x32: nCcalls sub_1674C4 soft threshold 200→50 (secondary mitigation for C-call depth) [v1.5.3-36]"),
+    (0x40F504, bytes.fromhex("1FC90071"), "arm64e 0x167504 CMP W8,#0x32: nCcalls sub_1674C4 soft threshold 200→50 (secondary mitigation for C-call depth) [v1.5.3-37]"),
 
     # PATCH E2: luaE_checkcstack soft threshold 200 → 50 (vmaddr 0x17CC04, FAT+0x424C04)
-    (0x424C04, bytes.fromhex("1FC90071"), "arm64e 0x17CC04 CMP W8,#0x32: luaE_checkcstack soft limit 200→50 [v1.5.3-36]"),
+    (0x424C04, bytes.fromhex("1FC90071"), "arm64e 0x17CC04 CMP W8,#0x32: luaE_checkcstack soft limit 200→50 [v1.5.3-37]"),
 
     # PATCH E3: luaE_checkcstack fatal threshold 220 → 70 (vmaddr 0x17CC28, FAT+0x424C28)
     # CMP W8,#0x46: #0x46<<10=0x11800; 0x7100001F|0x11800|0x100 = 0x7101191F → 1F 19 01 71
-    (0x424C28, bytes.fromhex("1F190171"), "arm64e 0x17CC28 CMP W8,#0x46: luaE_checkcstack fatal limit 220→70 [v1.5.3-36]"),
+    (0x424C28, bytes.fromhex("1F190171"), "arm64e 0x17CC28 CMP W8,#0x46: luaE_checkcstack fatal limit 220→70 [v1.5.3-37]"),
 
 ]
 
@@ -1192,7 +1143,7 @@ def main():
         lines = []
         for line in c_fd[ctrl_key].decode().splitlines():
             if line.startswith("Version:"):
-                lines.append("Version: 1.5.3-36+poc")
+                lines.append("Version: 1.5.3-37+poc")
             elif line.startswith("Depends:"):
                 val = line.rstrip()
                 if "oldabi" not in val:
@@ -1201,7 +1152,7 @@ def main():
             else:
                 lines.append(line)
         c_over[ctrl_key] = ("\n".join(lines) + "\n").encode()
-        print("Updated control: Version 1.5.3-36+poc, oldabi in Depends, postinst original")
+        print("Updated control: Version 1.5.3-37+poc, oldabi in Depends, postinst original")
     # postinst: keep original; signing is done in-patcher by _resign_slice (Python SHA-256)
 
     new_ctrl_tar = write_tar_gz(c_mem, c_fd, c_over)
@@ -1263,17 +1214,16 @@ def main():
     print("  D3: NOP BL sub_51988 at 0x2D720 in sub_2D6A8 (appKill/appkill, defense-in-depth).")
     print("arm64e: PATCH C1 (v1.5.3-35): partial fix for sub_166B78 BLRAAZ GC recursion.")
     print("  C1: NOP BL _luaC_step at 0x166BFC (inline GC step in luaD_call preamble).")
-    print("  Reduces GC pressure; primary BLRAAZ recursion at 0x166CB4 addressed by F1/F2.")
-    print("  Result: dispatch_async now uses serial 'com.webstream.lua.lock' queue →")
+    print("  Reduces GC pressure. Primary recursion cause still under investigation.")
+    print("  Result: dispatch_async uses serial 'com.webstream.lua.lock' queue →")
     print("    only ONE Lua VM execution at a time → no concurrent lua_State access.")
-    print("arm64e: PATCH F1+F2 (v1.5.3-36): fix SIGBUS from missing luaD_correctstack.")
-    print("  Root cause: sub_166B78 stores v6->func = TValue* into L->stack. Nested C→Lua→")
-    print("    luaD_growstack reallocs L->stack; outer frame's v6->func is stale. luaD_correctstack")
-    print("    absent from this binary → outer luaD_poscall writes to freed address → SIGBUS.")
-    print("  F1: 76-byte trampoline at 0x1B7798 (__const alignment padding, 136 zero bytes).")
-    print("    Saves L->stack before BLRAAZ; after BLRAAZ, computes delta and fixes v6->func.")
-    print("  F2: B 0x1B7798 at 0x166CAC (replaces LDR X8,[SP,#0x20]); trampoline handles rest.")
-    print("arm64e: PATCH E1-E3 (v1.5.3-36): tighten nCcalls / luaE_checkcstack thresholds.")
+    print("arm64e: PATCH F1+F2 REVERTED (v1.5.3-37): these patches caused DOUBLE-DELTA corruption.")
+    print("  luaD_reallocstack (0x1659FC) ALREADY corrects all StkId via sub_165B28+sub_165C0C.")
+    print("  sub_165C0C walks ci chain and adds new L->stack to every ci->func (incl. v6->func).")
+    print("  F1 trampoline was adding delta AGAIN → v6->func = correct + delta = garbage →")
+    print("  luaD_poscall wrote to wrong slot → TValue(gc=NULL, tt|=0x40) → GC crash at 0x9.")
+    print("  Confirmed: SpringBoard-2026-08-16-173613.ips EXC_BAD_ACCESS 0x9, Thread 25.")
+    print("arm64e: PATCH E1-E3 (v1.5.3-37): tighten nCcalls / luaE_checkcstack thresholds.")
     print("  E1: CMP W8,#0x32 at 0x167504 (sub_1674C4 soft limit: 200→50).")
     print("  E2: CMP W8,#0x32 at 0x17CC04 (luaE_checkcstack soft limit: 200→50).")
     print("  E3: CMP W8,#0x46 at 0x17CC28 (luaE_checkcstack fatal limit: 220→70).")
