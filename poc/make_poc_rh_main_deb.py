@@ -25,7 +25,7 @@ except ImportError:
     HAVE_ZST = False
 
 SOURCE_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate-1.5.3-3-roothide-iphoneos-arm64e.deb"
-OUTPUT_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate_poc-1.5.3-37-roothide-iphoneos-arm64e.deb"
+OUTPUT_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate_poc-1.5.3-38-roothide-iphoneos-arm64e.deb"
 
 PACIBSP = bytes.fromhex("7f2303d5")
 
@@ -647,7 +647,7 @@ PATCHES = [
     # PATCH C1 — NOP BL _luaC_step at 0x166BFC in sub_166B78 (luaD_call preamble)
     (0x40EBFC, bytes.fromhex("1F2003D5"), "arm64e 0x166BFC NOP BL _luaC_step: partial fix — prevents sub_166B78 from triggering GC cycle during C-function dispatch setup (only when GCdebt>0 AND used_slots<=20); primary BLRAAZ recursion at 0x166CB4 needs further investigation [v1.5.3-35]"),
 
-    # ── v1.5.3-37 PATCHES ─────────────────────────────────────────────────────────────────────
+    # ── v1.5.3-37 / v1.5.3-38 PATCHES ──────────────────────────────────────────────────────────
     #
     # REVERT F1+F2 (v1.5.3-36 regression): v1.5.3-36's trampoline was built on a false
     # premise — "luaD_correctstack confirmed absent". It is NOT absent. luaD_reallocstack
@@ -678,6 +678,27 @@ PATCHES = [
     # PATCH E3: luaE_checkcstack fatal threshold 220 → 70 (vmaddr 0x17CC28, FAT+0x424C28)
     # CMP W8,#0x46: #0x46<<10=0x11800; 0x7100001F|0x11800|0x100 = 0x7101191F → 1F 19 01 71
     (0x424C28, bytes.fromhex("1F190171"), "arm64e 0x17CC28 CMP W8,#0x46: luaE_checkcstack fatal limit 220→70 [v1.5.3-37]"),
+
+    # PATCH E2b: luaE_checkcstack soft branch B.NE → B.LO (vmaddr 0x17CC08, FAT+0x424C08)
+    # WHY: E2 changed CMP threshold from 200 to 50. But the branch at 0x17CC08 is B.NE
+    # (fires soft error only when nCcalls == 50, exact match). After pcall catches the error
+    # and longjmp unwinds, sub_1674C4's decrement at 0x1675E0 never runs → nCcalls stays
+    # elevated. Confirmed: luaD_pcall (0x167D14) does NOT restore L->nCcalls (saves only
+    # L->ci, L->allowhooks, L->errfunc). So nCcalls stays at 50, next call increments to 51,
+    # B.NE check: 51 != 50 → branch skips error → recursion continues to 509 levels → OOM.
+    #
+    # FIX: Change B.NE to B.LO (branch if Lower, unsigned <). New logic:
+    #   - B.LO taken if nCcalls < 50  → skip error (nCcalls below threshold)
+    #   - B.LO NOT taken if nCcalls >= 50 → fall through to luaG_runerror (soft error)
+    # Now EVERY call at nCcalls >= 50 throws immediately via longjmp → C thread stack
+    # stays shallow after each throw/catch cycle → OOM (pmap_enter resource shortage
+    # from 509 deep C frames) is prevented even though nCcalls grows monotonically.
+    #
+    # Encoding: B.cond = 0x54 | (imm19<<5) | cond
+    #   imm19 = (0x17CC1C - 0x17CC08) / 4 = 5; cond(NE)=1 → 0x540000A1 → A1 00 00 54 (old)
+    #   cond(LO/CC)=3 → 0x540000A3 → A3 00 00 54 (new)
+    # Verified old bytes at FAT+0x424C04..0x424C0B: 1f 21 03 71 A1 00 00 54 ✓
+    (0x424C08, bytes.fromhex("A3000054"), "arm64e 0x17CC08 B.LO: luaE_checkcstack soft limit B.NE→B.LO (==50 → >=50); prevents 509-deep C stack OOM (luaD_pcall confirmed no nCcalls restore) [v1.5.3-38]"),
 
 ]
 
@@ -1143,7 +1164,7 @@ def main():
         lines = []
         for line in c_fd[ctrl_key].decode().splitlines():
             if line.startswith("Version:"):
-                lines.append("Version: 1.5.3-37+poc")
+                lines.append("Version: 1.5.3-38+poc")
             elif line.startswith("Depends:"):
                 val = line.rstrip()
                 if "oldabi" not in val:
@@ -1152,7 +1173,7 @@ def main():
             else:
                 lines.append(line)
         c_over[ctrl_key] = ("\n".join(lines) + "\n").encode()
-        print("Updated control: Version 1.5.3-37+poc, oldabi in Depends, postinst original")
+        print("Updated control: Version 1.5.3-38+poc, oldabi in Depends, postinst original")
     # postinst: keep original; signing is done in-patcher by _resign_slice (Python SHA-256)
 
     new_ctrl_tar = write_tar_gz(c_mem, c_fd, c_over)
@@ -1224,6 +1245,13 @@ def main():
     print("  luaD_poscall wrote to wrong slot → TValue(gc=NULL, tt|=0x40) → GC crash at 0x9.")
     print("  Confirmed: SpringBoard-2026-08-16-173613.ips EXC_BAD_ACCESS 0x9, Thread 25.")
     print("arm64e: PATCH E1-E3 (v1.5.3-37): tighten nCcalls / luaE_checkcstack thresholds.")
+    print("arm64e: PATCH E2b (v1.5.3-38): fix luaE_checkcstack B.NE→B.LO at 0x17CC08.")
+    print("  luaD_pcall (0x167D14) confirmed: does NOT restore L->nCcalls after longjmp.")
+    print("  Old B.NE: soft error fires only at nCcalls==50 (exact match). After pcall catches,")
+    print("  nCcalls stays elevated (decrement at sub_1674C4+0x1675E0 never runs). Level 51+")
+    print("  bypass check (51!=50). Recursion continues to 509 levels → OOM.")
+    print("  New B.LO: branch skips error only when nCcalls<50. For nCcalls>=50, falls through")
+    print("  to luaG_runerror every time → immediate longjmp → C stack stays shallow → no OOM.")
     print("  E1: CMP W8,#0x32 at 0x167504 (sub_1674C4 soft limit: 200→50).")
     print("  E2: CMP W8,#0x32 at 0x17CC04 (luaE_checkcstack soft limit: 200→50).")
     print("  E3: CMP W8,#0x46 at 0x17CC28 (luaE_checkcstack fatal limit: 220→70).")
