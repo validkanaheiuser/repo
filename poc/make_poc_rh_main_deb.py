@@ -25,7 +25,7 @@ except ImportError:
     HAVE_ZST = False
 
 SOURCE_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate-1.5.3-3-roothide-iphoneos-arm64e.deb"
-OUTPUT_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate_poc-1.5.3-41-roothide-iphoneos-arm64e.deb"
+OUTPUT_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate_poc-1.5.3-42-roothide-iphoneos-arm64e.deb"
 
 PACIBSP = bytes.fromhex("7f2303d5")
 
@@ -556,20 +556,9 @@ PATCHES = [
     # LDR X0,[X0] encoding: 0xF9400000 → 00 00 40 f9
     # BL _objc_retain from 0x1ED04: delta=+0x1904E4, imm26=0x64139 → 0x94064139 → 39 41 06 94
 
-    # PATCH B1 — ADRP X0, page(qword_28AD50) at 0x1ECF4 [replace MOV X1, #0 (flags for dispatch_get_global_queue)]
-    (0x2C4CF4, bytes.fromhex("60130090"), "arm64e 0x1ECF4 ADRP X0,page(qword_28AD50)=0x28A000: use serial lua.lock queue in runBytecode [v1.5.3-34]"),
-
-    # PATCH B2 — ADD X0, X0, #0xD50 at 0x1ECF8 [replace MOV X0, X1 (identifier=0 for global queue)]
-    (0x2C4CF8, bytes.fromhex("00403591"), "arm64e 0x1ECF8 ADD X0,X0,#0xD50: complete qword_28AD50=page+0xD50 address [v1.5.3-34]"),
-
-    # PATCH B3 — LDR X0, [X0] at 0x1ECFC [replace BL _dispatch_get_global_queue]
-    # X0 now points to qword_28AD50; LDR dereferences to get the actual serial queue object.
-    (0x2C4CFC, bytes.fromhex("000040f9"), "arm64e 0x1ECFC LDR X0,[X0]: load serial queue from qword_28AD50 ptr [v1.5.3-34]"),
-
-    # PATCH B4 — BL _objc_retain at 0x1ED04 [replace BL _objc_retainAutoreleasedReturnValue]
-    # Must retain: code releases var_2E0 (the saved queue) at 0x1ED8C via _objc_release.
-    # Without retain, qword_28AD50 would be over-released and could be prematurely freed.
-    (0x2C4D04, bytes.fromhex("39410694"), "arm64e 0x1ED04 BL _objc_retain: retain serial queue to balance _objc_release at 0x1ED8C [v1.5.3-34]"),
+    # B1-B4 REMOVED (v1.5.3-42 fresh start): serial-queue rewrite broke Lua execution.
+    # runBytecode continues to use dispatch_get_global_queue (original concurrent queue).
+    # Concurrent lua_State crash (if it recurs) will be fixed at a different site.
 
     # ── v1.5.3-35 PATCHES ─────────────────────────────────────────────────────────────────────
     #
@@ -669,8 +658,8 @@ PATCHES = [
     #
     # Original bytes at 0x166BFC: C9 0E 00 94  BL _luaC_step (verified by IDA)
     #
-    # PATCH C1 — NOP BL _luaC_step at 0x166BFC in sub_166B78 (luaD_call preamble)
-    (0x40EBFC, bytes.fromhex("1F2003D5"), "arm64e 0x166BFC NOP BL _luaC_step: partial fix — prevents sub_166B78 from triggering GC cycle during C-function dispatch setup (only when GCdebt>0 AND used_slots<=20); primary BLRAAZ recursion at 0x166CB4 needs further investigation [v1.5.3-35]"),
+    # C1 REMOVED (v1.5.3-42 fresh start): luaC_step runs normally; V1+V2 already break
+    # the 9-hop GC recursion chain at 0x1666DC, so GC can complete safely without C1.
 
     # ── v1.5.3-37 / v1.5.3-38 PATCHES ──────────────────────────────────────────────────────────
     #
@@ -692,38 +681,30 @@ PATCHES = [
     # SpringBoard-2026-08-16-173613.ips: EXC_BAD_ACCESS at 0x0000000000000009, Thread 25).
     #
 
-    # PATCH E1: sub_167504 nCcalls soft threshold 200 → 50 (CMP W8,#0xC8 → CMP W8,#0x32)
-    # Encoding: CMP Wn,#imm12 = SUBS WZR,Wn,#imm = 0x7100001F | (imm<<10) | (Rn<<5) | 31
-    # #0x32<<10 = 0xC800; Rn=W8=8: 0x7100001F | 0xC800 | 0x100 = 0x7100C91F → 1F C9 00 71
-    (0x40F504, bytes.fromhex("1FC90071"), "arm64e 0x167504 CMP W8,#0x32: nCcalls sub_1674C4 soft threshold 200→50 (secondary mitigation for C-call depth) [v1.5.3-37]"),
-
-    # PATCH E2: luaE_checkcstack soft threshold 200 → 50 (vmaddr 0x17CC04, FAT+0x424C04)
-    (0x424C04, bytes.fromhex("1FC90071"), "arm64e 0x17CC04 CMP W8,#0x32: luaE_checkcstack soft limit 200→50 [v1.5.3-37]"),
-
-    # PATCH E3/v41: luaE_checkcstack direct-throw threshold 220 → 50.
-    # CMP W8,#0x46: #0x46<<10=0x11800; 0x7100001F|0x11800|0x100 = 0x7101191F → 1F 19 01 71
-    (0x424C28, bytes.fromhex("1FC90071"), "arm64e 0x17CC28 CMP W8,#0x32: luaE_checkcstack direct luaD_throw limit 220→50 [v1.5.3-41]"),
+    # E1/E2/E3 REMOVED (v1.5.3-42 fresh start): lowering thresholds 200→50/220→50 breaks
+    # Lua scripts with normal C-call depth. Original thresholds (200 soft, 220 fatal) restored.
+    # E2b below keeps B.LO fix at the ORIGINAL 200 threshold — safe for all normal scripts.
 
     # PATCH E2b: luaE_checkcstack soft branch B.NE → B.LO (vmaddr 0x17CC08, FAT+0x424C08)
-    # WHY: E2 changed CMP threshold from 200 to 50. But the branch at 0x17CC08 is B.NE
-    # (fires soft error only when nCcalls == 50, exact match). After pcall catches the error
-    # and longjmp unwinds, sub_1674C4's decrement at 0x1675E0 never runs → nCcalls stays
+    # E1/E2/E3 removed → CMP at 0x17CC04 uses ORIGINAL threshold: CMP W8,#200 (0xC8).
+    # WHY E2b is still needed at original 200: the branch at 0x17CC08 is B.NE, which fires
+    # soft error only when nCcalls == 200 (exact match). After pcall catches the error and
+    # longjmp unwinds, sub_1674C4's decrement at 0x1675E0 never runs → nCcalls stays
     # elevated. Confirmed: luaD_pcall (0x167D14) does NOT restore L->nCcalls (saves only
-    # L->ci, L->allowhooks, L->errfunc). So nCcalls stays at 50, next call increments to 51,
-    # B.NE check: 51 != 50 → branch skips error → recursion continues to 509 levels → OOM.
+    # L->ci, L->allowhooks, L->errfunc). So nCcalls stays at 200, next call increments to
+    # 201, B.NE check: 201 != 200 → branch skips error → recursion continues → OOM.
     #
-    # FIX: Change B.NE to B.LO (branch if Lower, unsigned <). New logic:
-    #   - B.LO taken if nCcalls < 50  → skip error (nCcalls below threshold)
-    #   - B.LO NOT taken if nCcalls >= 50 → fall through to luaG_runerror (soft error)
-    # Now EVERY call at nCcalls >= 50 throws immediately via longjmp → C thread stack
-    # stays shallow after each throw/catch cycle → OOM (pmap_enter resource shortage
-    # from 509 deep C frames) is prevented even though nCcalls grows monotonically.
+    # FIX: Change B.NE to B.LO (branch if Lower, unsigned <). New logic with original CMP:
+    #   - B.LO taken if nCcalls < 200  → skip error (normal Lua scripts unaffected)
+    #   - B.LO NOT taken if nCcalls >= 200 → fall through to luaG_runerror (soft error)
+    # Every call at nCcalls >= 200 throws immediately → C stack stays bounded. Safe for
+    # all normal scripts (they never reach 200 C-call depth).
     #
     # Encoding: B.cond = 0x54 | (imm19<<5) | cond
     #   imm19 = (0x17CC1C - 0x17CC08) / 4 = 5; cond(NE)=1 → 0x540000A1 → A1 00 00 54 (old)
     #   cond(LO/CC)=3 → 0x540000A3 → A3 00 00 54 (new)
     # Verified old bytes at FAT+0x424C04..0x424C0B: 1f 21 03 71 A1 00 00 54 ✓
-    (0x424C08, bytes.fromhex("A3000054"), "arm64e 0x17CC08 B.LO: luaE_checkcstack soft limit B.NE→B.LO (==50 → >=50); prevents 509-deep C stack OOM (luaD_pcall confirmed no nCcalls restore) [v1.5.3-38]"),
+    (0x424C08, bytes.fromhex("A3000054"), "arm64e 0x17CC08 B.LO: luaE_checkcstack soft limit B.NE→B.LO (==200 → >=200, original threshold); prevents runaway nCcalls accumulation after pcall longjmp [v1.5.3-42]"),
 
 ]
 
