@@ -25,7 +25,7 @@ except ImportError:
     HAVE_ZST = False
 
 SOURCE_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate-1.5.3-3-roothide-iphoneos-arm64e.deb"
-OUTPUT_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate_poc-1.5.3-43-roothide-iphoneos-arm64e.deb"
+OUTPUT_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate_poc-1.5.3-44-roothide-iphoneos-arm64e.deb"
 
 PACIBSP = bytes.fromhex("7f2303d5")
 
@@ -754,6 +754,38 @@ PATCHES = [
     # Same XOR-based check inside the GC step function; also fires after 5s.
     (0x4128E4, bytes.fromhex("1F2003D5"), "arm64e 0x16a8e4 NOP STR W8,[X9]: prevent _ws_fragd_stop=1 in _luaC_step (5s guard; orig=28 01 00 B9) [v1.5.3-43]"),
 
+    # ── v1.5.3-44 PATCHES ─────────────────────────────────────────────────────────────────────
+    #
+    # ROOT CAUSE OF 508× sub_166B78 BLRAAZ stack overflow (SpringBoard-2026-08-19-025131.ips):
+    #
+    # sub_166B78 (vmaddr 0x166B78) is the Lua C-function dispatcher.
+    # Its preamble (before BLRAAZ X8 at 0x166CB4) calls luaC_step when the Lua value stack
+    # has ≤20 free slots AND GCdebt > 0:
+    #
+    #   if ((L->stack_last - L->top) >> 4 <= 20) {         // ≤20 slots remaining
+    #     if (*(L->l_G + 24) > 0)                          // GCdebt > 0
+    #       luaC_step(L);   ← vmaddr 0x166BFC, FAT+0x40EBFC  ← C1 patches this
+    #     luaD_growstack(L, 20, 1);
+    #   }
+    #
+    # During deep Lua-C-Lua mutual recursion, the value stack fills up, triggering luaC_step.
+    # luaC_step runs GC finalizers (__gc metamethods). If finalizers call C functions,
+    # those go through sub_166B78 again — creating another recursion level. Each level
+    # pushes LR=0x166CB8 (BLRAAZ return) onto the ARM64 call stack via the tail-call chain:
+    #   luaD_pretailcall → B sub_166B78 (tail call, LR not updated)
+    # so ALL 508 frames appear as 0x166CB8 with no intermediate addresses.
+    #
+    # v1.5.3-43 removed C1 but added F1a+F1b (fragd_stop NOPs). With Lua now running past 5s,
+    # the GC-finalizer recursion accumulates to 508 levels → SIGBUS (stack overflow).
+    #
+    # FIX: restore C1 — NOP the luaC_step call at 0x166BFC in sub_166B78's preamble.
+    # GC still runs via luaD_pretailcall (0x1669C8) and luaD_precall (0x166FD8) paths;
+    # only the INLINED call inside sub_166B78's stack-grow block is NOPed.
+    # Original bytes: C9 0E 00 94 (BL to _luaC_step). Verified by IDA get_bytes.
+
+    # PATCH C1 (RESTORED) — NOP BL _luaC_step in sub_166B78 preamble (vmaddr 0x166BFC, FAT+0x40EBFC)
+    (0x40EBFC, bytes.fromhex("1F2003D5"), "arm64e 0x166BFC NOP BL luaC_step in sub_166B78 stack-grow preamble: prevents GC-finalizer recursion chain (orig=C9 0E 00 94) [v1.5.3-44]"),
+
 ]
 
 
@@ -1218,7 +1250,7 @@ def main():
         lines = []
         for line in c_fd[ctrl_key].decode().splitlines():
             if line.startswith("Version:"):
-                lines.append("Version: 1.5.3-43+poc")
+                lines.append("Version: 1.5.3-44+poc")
             elif line.startswith("Depends:"):
                 val = line.rstrip()
                 if "oldabi" not in val:
@@ -1227,7 +1259,7 @@ def main():
             else:
                 lines.append(line)
         c_over[ctrl_key] = ("\n".join(lines) + "\n").encode()
-        print("Updated control: Version 1.5.3-43+poc, oldabi in Depends, postinst original")
+        print("Updated control: Version 1.5.3-44+poc, oldabi in Depends, postinst original")
     # postinst: keep original; signing is done in-patcher by _resign_slice (Python SHA-256)
 
     new_ctrl_tar = write_tar_gz(c_mem, c_fd, c_over)
@@ -1309,6 +1341,13 @@ def main():
     print("  E1: CMP W8,#0x32 at 0x167504 (sub_1674C4 soft limit: 200→50).")
     print("  E2: CMP W8,#0x32 at 0x17CC04 (luaE_checkcstack soft limit: 200→50).")
     print("  E3/v41: skip luaG_runerror; CMP W8,#0x32 at 0x17CC28 (direct luaD_throw at >=50).")
+    print("arm64e: PATCH C1 RESTORED (v1.5.3-44): fix 508× sub_166B78 BLRAAZ stack overflow.")
+    print("  Root cause: sub_166B78 preamble calls luaC_step when value stack ≤20 free slots.")
+    print("  luaC_step runs GC finalizers which re-enter sub_166B78 via tail-call chain.")
+    print("  Each re-entry saves LR=0x166CB8 (BLRAAZ return). With fragd_stop removed (v1.5.3-43)")
+    print("  Lua runs past 5s, accumulating 508 ARM64 frames → SIGBUS (stack overflow).")
+    print("  C1: NOP BL luaC_step at 0x166BFC (FAT+0x40EBFC; orig=C9 0E 00 94).")
+    print("  GC still runs via luaD_pretailcall/luaD_precall paths; only sub_166B78 preamble NOP'd.")
 
 
 if __name__ == "__main__":
