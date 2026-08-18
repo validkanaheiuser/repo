@@ -25,7 +25,7 @@ except ImportError:
     HAVE_ZST = False
 
 SOURCE_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate-1.5.3-3-roothide-iphoneos-arm64e.deb"
-OUTPUT_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate_poc-1.5.3-42-roothide-iphoneos-arm64e.deb"
+OUTPUT_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate_poc-1.5.3-43-roothide-iphoneos-arm64e.deb"
 
 PACIBSP = bytes.fromhex("7f2303d5")
 
@@ -705,6 +705,54 @@ PATCHES = [
     #   cond(LO/CC)=3 → 0x540000A3 → A3 00 00 54 (new)
     # Verified old bytes at FAT+0x424C04..0x424C0B: 1f 21 03 71 A1 00 00 54 ✓
     (0x424C08, bytes.fromhex("A3000054"), "arm64e 0x17CC08 B.LO: luaE_checkcstack soft limit B.NE→B.LO (==200 → >=200, original threshold); prevents runaway nCcalls accumulation after pcall longjmp [v1.5.3-42]"),
+
+    # ── v1.5.3-43 PATCHES ─────────────────────────────────────────────────────────────────────
+    #
+    # ROOT CAUSE OF "license patch breaks Lua": _ws_fragd_stop = 1 fires after 5s of Lua execution.
+    #
+    # IDA confirms two independent functions each write _ws_fragd_stop = 1 when license XOR ≠ 9:
+    #
+    # SITE F1a — _luaD_call (vmaddr 0x1673B0..0x1674C0, IDA: fragd-stop Block 2):
+    #   Every invocation: if _lvm_t0≠0 AND _lvm_tb_denom≠0 AND fragd_stop=0:
+    #     compute mach_absolute_time elapsed since some reference.
+    #     if elapsed >= 5s:
+    #       XOR = ws_5bdbfea197ae33f4 ^ ws_48959c8a42ef91a0
+    #       if (_lua_frag_ok & 0xF) != 0xF OR XOR != 9:
+    #         _ws_fragd_stop = 1   ← vmaddr 0x1674A8, FAT+0x40F4A8, "28 01 00 B9"
+    #
+    # SITE F1b — _luaC_step (vmaddr 0x16A8D0..0x16A8E4):
+    #   Same XOR check: CMP W8, #9; B.EQ skip; MOV W8,#1; ADRP; ADD; STR W8,[X9]
+    #     _ws_fragd_stop = 1   ← vmaddr 0x16a8e4, FAT+0x4128E4, "28 01 00 B9"
+    #
+    # WHY sub_108E50 returning 0 causes this:
+    #   PATCH S sets sub_108E50 (vmaddr 0x108E50 = "lc gate") to return 0.
+    #   _luaD_call Block 1 (~31s): sub_108E50()=0 → sub_1675F4 NOT called → dword_28BB08 stays 0
+    #     → ws_5bdbfea197ae33f4 is NOT updated → XOR stays ≠ 9.
+    #   _luaD_call Block 2 (every call after 5s): XOR ≠ 9 → condition TRUE → fragd_stop=1.
+    #   Once _ws_fragd_stop=1: wherever luaV_execute polls it, Lua stops → errors.
+    #
+    # WHY NOP (not change sub_108E50 to return 1):
+    #   sub_1C1AC (Lua debug hook, 45–65s):
+    #     checks dword_28BB08 first (set only at ~31s by Block 1).
+    #     if dword_28BB08=0 (early, before 31s) AND sub_108E50()=1 → runs full PBKDF2 → fails → error.
+    #     if sub_108E50()=0 → reschedules (no error). Returning 0 is SAFER in sub_1C1AC.
+    #   luaV_execute (0x18C200): calls sub_108E50 but IGNORES result (both CBNZ and B converge
+    #     immediately to the same target 0x18c20c). No behavioral difference either way.
+    #   Safest fix: keep sub_108E50=0 (PATCH S unchanged) and NOP BOTH fragd_stop write sites.
+    #
+    # _ws_lvm_reset (0x18a168) also references __ws_fragd_stop but writes WZR (stores 0 = reset).
+    # This is the legitimate clear-on-reset path — NOT patched.
+    #
+    # Verified bytes at both write sites: "28 01 00 B9" = STR W8,[X9] (W8=1, X9=&_ws_fragd_stop).
+    # Verified read-only refs at 0x1673B0/0x1673B8 (ADRP+LDR check) and 0x16a88c/0x16a894 — untouched.
+
+    # PATCH F1a — NOP _ws_fragd_stop=1 in _luaD_call (vmaddr 0x1674A8, FAT+0x40F4A8)
+    # Prevents the 5s elapsed-time guard from stopping Lua when license XOR ≠ 9.
+    (0x40F4A8, bytes.fromhex("1F2003D5"), "arm64e 0x1674A8 NOP STR W8,[X9]: prevent _ws_fragd_stop=1 in _luaD_call (5s guard; orig=28 01 00 B9) [v1.5.3-43]"),
+
+    # PATCH F1b — NOP _ws_fragd_stop=1 in _luaC_step (vmaddr 0x16a8e4, FAT+0x4128E4)
+    # Same XOR-based check inside the GC step function; also fires after 5s.
+    (0x4128E4, bytes.fromhex("1F2003D5"), "arm64e 0x16a8e4 NOP STR W8,[X9]: prevent _ws_fragd_stop=1 in _luaC_step (5s guard; orig=28 01 00 B9) [v1.5.3-43]"),
 
 ]
 
