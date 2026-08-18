@@ -25,7 +25,7 @@ except ImportError:
     HAVE_ZST = False
 
 SOURCE_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate-1.5.3-3-roothide-iphoneos-arm64e.deb"
-OUTPUT_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate_poc-1.5.3-39-roothide-iphoneos-arm64e.deb"
+OUTPUT_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate_poc-1.5.3-40-roothide-iphoneos-arm64e.deb"
 
 PACIBSP = bytes.fromhex("7f2303d5")
 
@@ -76,6 +76,17 @@ ARM64E_SLICE_OFF = 0x2A8000  # FAT offset where arm64e slice begins
 #   FAT+0x2AF914: 04 00 00 94  (BL vmaddr 0x7924 = IOHIDEventSystemClient, in sub_78FC 1s timer)
 #   FAT+0x2AFAB0: 9d ff ff 97  (BL vmaddr 0x7924 = IOHIDEventSystemClient, in sub_7A98 3s timer)
 PATCHES = [
+    # v1.5.3-40 — stop must abort the Lua VM, not turn sleep() into a zero-delay call.
+    # Live Frida trace on SpringBoard showed the stop flag flip to 1, followed by
+    # sub_2E448 (Lua sleep callback) returning 0 repeatedly (calls 37..103 in ~11 ms),
+    # with no releaseLuaState/lua_close/worker exit before the crash. IDA confirms both
+    # stop branches currently set return value 0 and jump to the epilogue. Load the
+    # saved lua_State * from [X29,#-0x10] into X0, then branch to existing noreturn
+    # sub_2E764, which calls luaL_error(L, "user_stopped").
+    # vmaddr 0x2E4B8: LDUR X0,[X29,#-0x10]; B sub_2E764 (imm26 0xAA)
+    (0x2D64B8, bytes.fromhex("A0035FF8AA000014"), "arm64e Lua sleep initial stop path -> sub_2E764 luaL_error('user_stopped') [v1.5.3-40]"),
+    # vmaddr 0x2E578: LDUR X0,[X29,#-0x10]; B sub_2E764 (imm26 0x7A)
+    (0x2D6578, bytes.fromhex("A0035FF87A000014"), "arm64e Lua sleep loop stop path -> sub_2E764 luaL_error('user_stopped') [v1.5.3-40]"),
     # v1.5.3-39 — globally disable toast dispatch. The v38 caller-specific NOPs did not
     # stop SpringBoard-2026-08-16-192757.ips: SpringBoard lived only ~22 seconds yet the
     # crashing main-thread stack contained 501 nested _dispatch_call_block_and_release
@@ -1172,7 +1183,7 @@ def main():
         lines = []
         for line in c_fd[ctrl_key].decode().splitlines():
             if line.startswith("Version:"):
-                lines.append("Version: 1.5.3-39+poc")
+                lines.append("Version: 1.5.3-40+poc")
             elif line.startswith("Depends:"):
                 val = line.rstrip()
                 if "oldabi" not in val:
@@ -1181,7 +1192,7 @@ def main():
             else:
                 lines.append(line)
         c_over[ctrl_key] = ("\n".join(lines) + "\n").encode()
-        print("Updated control: Version 1.5.3-39+poc, oldabi in Depends, postinst original")
+        print("Updated control: Version 1.5.3-40+poc, oldabi in Depends, postinst original")
     # postinst: keep original; signing is done in-patcher by _resign_slice (Python SHA-256)
 
     new_ctrl_tar = write_tar_gz(c_mem, c_fd, c_over)
