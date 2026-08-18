@@ -25,7 +25,7 @@ except ImportError:
     HAVE_ZST = False
 
 SOURCE_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate-1.5.3-3-roothide-iphoneos-arm64e.deb"
-OUTPUT_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate_poc-1.5.3-40-roothide-iphoneos-arm64e.deb"
+OUTPUT_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate_poc-1.5.3-41-roothide-iphoneos-arm64e.deb"
 
 PACIBSP = bytes.fromhex("7f2303d5")
 
@@ -76,6 +76,12 @@ ARM64E_SLICE_OFF = 0x2A8000  # FAT offset where arm64e slice begins
 #   FAT+0x2AF914: 04 00 00 94  (BL vmaddr 0x7924 = IOHIDEventSystemClient, in sub_78FC 1s timer)
 #   FAT+0x2AFAB0: 9d ff ff 97  (BL vmaddr 0x7924 = IOHIDEventSystemClient, in sub_7A98 3s timer)
 PATCHES = [
+    # v1.5.3-41 — direct longjmp for C-stack overflow. Frida + 005049.ips prove
+    # 509 repeated return frames at sub_166B78+0x154 (0x166CCC), then luaD_poscall
+    # crashes at 0x166664 reading 0xA4D7724A0. The v38 >=50 guard did fire, but
+    # luaG_runerror("C stack overflow") itself re-entered Lua callbacks and recursed.
+    # Skip luaG_runerror entirely; the second check below now throws at >=50.
+    (0x424C0C, bytes.fromhex("04000014"), "arm64e 0x17CC0C B 0x17CC1C: skip recursive luaG_runerror formatting [v1.5.3-41]"),
     # v1.5.3-40 — stop must abort the Lua VM, not turn sleep() into a zero-delay call.
     # Live Frida trace on SpringBoard showed the stop flag flip to 1, followed by
     # sub_2E448 (Lua sleep callback) returning 0 repeatedly (calls 37..103 in ~11 ms),
@@ -694,9 +700,9 @@ PATCHES = [
     # PATCH E2: luaE_checkcstack soft threshold 200 → 50 (vmaddr 0x17CC04, FAT+0x424C04)
     (0x424C04, bytes.fromhex("1FC90071"), "arm64e 0x17CC04 CMP W8,#0x32: luaE_checkcstack soft limit 200→50 [v1.5.3-37]"),
 
-    # PATCH E3: luaE_checkcstack fatal threshold 220 → 70 (vmaddr 0x17CC28, FAT+0x424C28)
+    # PATCH E3/v41: luaE_checkcstack direct-throw threshold 220 → 50.
     # CMP W8,#0x46: #0x46<<10=0x11800; 0x7100001F|0x11800|0x100 = 0x7101191F → 1F 19 01 71
-    (0x424C28, bytes.fromhex("1F190171"), "arm64e 0x17CC28 CMP W8,#0x46: luaE_checkcstack fatal limit 220→70 [v1.5.3-37]"),
+    (0x424C28, bytes.fromhex("1FC90071"), "arm64e 0x17CC28 CMP W8,#0x32: luaE_checkcstack direct luaD_throw limit 220→50 [v1.5.3-41]"),
 
     # PATCH E2b: luaE_checkcstack soft branch B.NE → B.LO (vmaddr 0x17CC08, FAT+0x424C08)
     # WHY: E2 changed CMP threshold from 200 to 50. But the branch at 0x17CC08 is B.NE
@@ -1183,7 +1189,7 @@ def main():
         lines = []
         for line in c_fd[ctrl_key].decode().splitlines():
             if line.startswith("Version:"):
-                lines.append("Version: 1.5.3-40+poc")
+                lines.append("Version: 1.5.3-41+poc")
             elif line.startswith("Depends:"):
                 val = line.rstrip()
                 if "oldabi" not in val:
@@ -1192,7 +1198,7 @@ def main():
             else:
                 lines.append(line)
         c_over[ctrl_key] = ("\n".join(lines) + "\n").encode()
-        print("Updated control: Version 1.5.3-40+poc, oldabi in Depends, postinst original")
+        print("Updated control: Version 1.5.3-41+poc, oldabi in Depends, postinst original")
     # postinst: keep original; signing is done in-patcher by _resign_slice (Python SHA-256)
 
     new_ctrl_tar = write_tar_gz(c_mem, c_fd, c_over)
@@ -1273,7 +1279,7 @@ def main():
     print("  to luaG_runerror every time → immediate longjmp → C stack stays shallow → no OOM.")
     print("  E1: CMP W8,#0x32 at 0x167504 (sub_1674C4 soft limit: 200→50).")
     print("  E2: CMP W8,#0x32 at 0x17CC04 (luaE_checkcstack soft limit: 200→50).")
-    print("  E3: CMP W8,#0x46 at 0x17CC28 (luaE_checkcstack fatal limit: 220→70).")
+    print("  E3/v41: skip luaG_runerror; CMP W8,#0x32 at 0x17CC28 (direct luaD_throw at >=50).")
 
 
 if __name__ == "__main__":
