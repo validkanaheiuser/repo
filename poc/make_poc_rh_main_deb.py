@@ -25,7 +25,7 @@ except ImportError:
     HAVE_ZST = False
 
 SOURCE_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate-1.5.3-3-roothide-iphoneos-arm64e.deb"
-OUTPUT_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate_poc-1.5.3-44-roothide-iphoneos-arm64e.deb"
+OUTPUT_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate_poc-1.5.3-45-roothide-iphoneos-arm64e.deb"
 
 PACIBSP = bytes.fromhex("7f2303d5")
 
@@ -786,6 +786,80 @@ PATCHES = [
     # PATCH C1 (RESTORED) — NOP BL _luaC_step in sub_166B78 preamble (vmaddr 0x166BFC, FAT+0x40EBFC)
     (0x40EBFC, bytes.fromhex("1F2003D5"), "arm64e 0x166BFC NOP BL luaC_step in sub_166B78 stack-grow preamble: prevents GC-finalizer recursion chain (orig=C9 0E 00 94) [v1.5.3-44]"),
 
+    # ── v1.5.3-45 PATCHES ─────────────────────────────────────────────────────────────────────
+    #
+    # ROOT CAUSE OF concurrent lua_State UAF (SpringBoard crash, Thread 14):
+    #   Thread 14 crash: sub_1665B8+0xAC (vmaddr 0x166664) LDR X8,[X8] where X8=L->top-16
+    #   L->top = 0xA4D7724A0 (freed pointer into old L->stack)
+    #   Thread 2: sleeping in sub_2DF1C (Lua sleep() C function, not in VM)
+    #
+    # MECHANISM (CONFIRMED STATIC ANALYSIS):
+    #
+    #   sub_2E96C (vmaddr 0x2E96C) — Lua C function registered in SINGLETON as "async":
+    #     a1 = SINGLETON lua_State*
+    #     v29 = lua_newthread(a1)        ← child coroutine L_child, shares global_State
+    #     *(v29 - 8) = context_struct    ← L_child[-8] = stop_flag/context
+    #     dispatch_async(global_queue_concurrent, block_with_L_child)  ← Thread 14
+    #
+    #   sub_541A8 (block invoke on Thread 14):
+    #     lua_pcallk(L_child, 0, 0, 0, 0, 0)  ← executes L_child's Lua function
+    #     → enters sub_166B78 → BLRAAZ → luaD_poscall → sub_1665B8 ← CRASH SITE
+    #
+    #   sub_6C53C (called via sub_1C7FC → dispatch_sync "ws.async.lock" serial queue):
+    #     dict = qword_28AE08 (stores L_child as NSValue via sub_540E4)
+    #     for each entry:
+    #       L_child = [dict[key] pointerValue]         ← get running L_child
+    #       *(L_child - 8)->stop_flag = 1              ← set stop flag (byte write)
+    #       lua_getstack(L_child, 0, v24)  ← vmaddr 0x6C718, FAT+0x314718  ← RACE!
+    #       lua_getinfo(L_child, "nSl", v24)  ← vmaddr 0x6C730, FAT+0x314730  ← RACE!
+    #     [dict removeAllObjects]
+    #
+    #   sub_1C7FC calls sub_6C53C (via serial queue) from:
+    #     -[ws_68bf136d1256e4e9 stopAllScripts]    ← user stops script
+    #     -[ws_68bf136d1256e4e9 runScript:...]     ← new script started
+    #     -[ws_68bf136d1256e4e9 runBytecode:...]   ← new bytecode run
+    #     -[ws_68bf136d1256e4e9 releaseLuaState:]  ← state released
+    #     sub_2E8A8, sub_2E8D4 (Lua C functions)  ← called from L_child itself
+    #
+    # THE RACE (UAF):
+    #   Thread 14 executing L_child's VM reads L_child->ci, L_child->top, L_child->stack.
+    #   Thread X (serial queue running sub_6C53C) calls lua_getstack(L_child) which reads
+    #   L_child->ci, and lua_getinfo(L_child,"nSl") which reads L_child->ci->func, source,
+    #   line — all WITHOUT any synchronization on L_child (Lua's lua_lock is a no-op).
+    #   This write/read race on L_child's CI chain causes Thread 14 to see stale L->top
+    #   pointing to freed stack memory → LDR X8,[L->top-16] → EXC_BAD_ACCESS.
+    #
+    # FIX — PATCH G1: Replace BL _lua_getstack with MOVZ W0,#0 in sub_6C53C.
+    #   Original: CA DA 03 94 (BL _lua_getstack at vmaddr 0x163240)
+    #   Patch:    00 00 80 52 (MOVZ W0, #0)
+    #   Effect: W0=0 → existing CBZ W0 at vmaddr 0x6C71C (FAT+0x31471C) branches to
+    #   0x6C7AC (past lua_getinfo block). sub_6C53C still sets stop_flag=1 and logs
+    #   "[async] stopped by %@: %@:0: <anonymous>" — slightly less debug info but safe.
+    #   lua_getstack(L_child) and lua_getinfo(L_child) are NEVER called from Thread X.
+    #   No unsynchronized concurrent read of L_child from a foreign thread.
+    #
+    # Verified original bytes at FAT+0x314718: CA DA 03 94 (BL _lua_getstack target 0x163240)
+    # Verified branch-if-zero at FAT+0x31471C: 60 04 00 34 (branch-W0-zero offset 0x8C → target 0x6C7A8)
+    (0x314718, bytes.fromhex("00008052"),
+     "arm64e sub_6C53C 0x6C718 MOVZ W0,#0 (was BL _lua_getstack CA DA 03 94): "
+     "eliminate concurrent L_child access from ws.async.lock serial queue; "
+     "branch-if-zero at 0x6C71C skips lua_getinfo — Thread X no longer reads L_child->ci "
+     "while Thread 14 writes it; fixes UAF crash at sub_1665B8+0xAC (0x166664) [v1.5.3-45]"),
+
+    # FIX — PATCH G2: Re-enable _ws_show_toast (vmaddr 0xF1FC, FAT+0x2B71FC).
+    #   v1.5.3-39 disabled toast globally via RETAB at 0xF1FC to stop 501x dispatch loop.
+    #   That loop's root cause was _ws_fragd_stop=1 firing at T+5s → error toast spam
+    #   (now blocked by F1a+F1b at 0x40F4A8/0x4128E4) and license-failure toast at T~60s
+    #   (now blocked by Q/R/S). Animation recursion inside sub_F2EC is fixed by A1-A6
+    #   (NOP setAlpha/animateWithDuration) and Z1 (NOP setWindowScene). With all those
+    #   callers blocked, re-enabling toast allows the tweak to show user notifications.
+    #   Restore original SUB SP,SP,#0x80 (FF 03 02 D1) at 0xF1FC so _ws_show_toast runs.
+    (0x2B71FC, bytes.fromhex("FF0302D1"),
+     "arm64e _ws_show_toast 0xF1FC restore SUB SP,SP,#0x80 FF0302D1 "
+     "(was RETAB FF0F5FD6 from v1.5.3-39): re-enable toast; "
+     "fragd_stop spam blocked F1a+F1b, license spam blocked Q/R/S, "
+     "animation recursion fixed A1-A6+Z1 [v1.5.3-45]"),
+
 ]
 
 
@@ -1250,7 +1324,7 @@ def main():
         lines = []
         for line in c_fd[ctrl_key].decode().splitlines():
             if line.startswith("Version:"):
-                lines.append("Version: 1.5.3-44+poc")
+                lines.append("Version: 1.5.3-45+poc")
             elif line.startswith("Depends:"):
                 val = line.rstrip()
                 if "oldabi" not in val:
@@ -1259,7 +1333,7 @@ def main():
             else:
                 lines.append(line)
         c_over[ctrl_key] = ("\n".join(lines) + "\n").encode()
-        print("Updated control: Version 1.5.3-44+poc, oldabi in Depends, postinst original")
+        print("Updated control: Version 1.5.3-45+poc, oldabi in Depends, postinst original")
     # postinst: keep original; signing is done in-patcher by _resign_slice (Python SHA-256)
 
     new_ctrl_tar = write_tar_gz(c_mem, c_fd, c_over)
@@ -1342,6 +1416,8 @@ def main():
     print("  E2: CMP W8,#0x32 at 0x17CC04 (luaE_checkcstack soft limit: 200→50).")
     print("  E3/v41: skip luaG_runerror; CMP W8,#0x32 at 0x17CC28 (direct luaD_throw at >=50).")
     print("arm64e: PATCH C1 RESTORED (v1.5.3-44): fix 508× sub_166B78 BLRAAZ stack overflow.")
+    print("arm64e: PATCH G1 (v1.5.3-45): sub_6C53C 0x6C718 MOVZ W0,#0 — eliminate concurrent L_child access (UAF fix).")
+    print("arm64e: PATCH G2 (v1.5.3-45): _ws_show_toast 0xF1FC restore SUB SP,SP,#0x80 — re-enable toast.")
     print("  Root cause: sub_166B78 preamble calls luaC_step when value stack ≤20 free slots.")
     print("  luaC_step runs GC finalizers which re-enter sub_166B78 via tail-call chain.")
     print("  Each re-entry saves LR=0x166CB8 (BLRAAZ return). With fragd_stop removed (v1.5.3-43)")
