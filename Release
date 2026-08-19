@@ -1,0 +1,32 @@
+Architectures: iphoneos-arm64e iphoneos-arm
+Codename: stable
+Components: main
+Date: Wed, 19 Aug 2026 19:16:00 +0000
+Description: Personal Sileo APT Repository
+Label: My Sileo Repo
+Origin: My Sileo Repo
+Suite: stable
+MD5Sum:
+ 117846736b845b1fd0db52dec6ea82eb            41933 Packages
+ bfaf9b6491263de65df7ba08b0a4f6cc             3120 Packages.bz2
+ c7c9ccaff85c2907fb5ef9f624016d55             3960 Packages.gz
+ d9f488b2f4ff4a6777576668de22e289             3516 Packages.xz
+ 93da2426c4e57a554fb774fdaa7074aa              216 Release
+SHA1:
+ 83d33855a12e74bcf128d1f8190c77a798ef731f            41933 Packages
+ 1a8e32b39e2668fe2b7d18192894333840c83579             3120 Packages.bz2
+ 1afffacb650264b78b85afe9b82fd20abb7c742e             3960 Packages.gz
+ df0ec78a6b6ecaef93d161542f4c98a75f8377e4             3516 Packages.xz
+ 2559e397a5debba8a69fa978644aa6a0c50e8902              216 Release
+SHA256:
+ bbb6103f3f1ec1c7af98f45222825e052acfdbc5b10d60d52b6aab50e3e53d94            41933 Packages
+ 25a24abaea26af0ce9481b864cff572a6132d53ce07f00a55479a613f62b58dc             3120 Packages.bz2
+ 4d0265a7e2a739aa133809a46901d1253b832f49cb40c6d5284a3100738e3f96             3960 Packages.gz
+ 4958b9b9fbbd823d284dcbcf49181d4eee7929217d7823311eec63e9ee158c3e             3516 Packages.xz
+ d154d9d9f3f6f5ac33a87bbf49cb44523e57b1a7774a7212038a7403644f16ff              216 Release
+SHA512:
+ 994939f32d9d208023180edaebcc7be5e041e8c6f105ff39f42c38ba2436073aeba67049438a50a00fd9bea6a5cc86665563be177621119bfbce41a44bb8f170            41933 Packages
+ 8cf64afd3e98c34a9e9f4dfebb9e60821ebbbd198ec6d2d1422cc915e17debdd005578bac1926506902c0c65ee87491de0dff6106d4644ace5a725c249ef1071             3120 Packages.bz2
+ ad204c965353b983f934ac1a3e2994929e08369bf8835652450503ed0c10609c96938432c1130b15a65a233f2b5b420037f294f02fefbd6a378762395c9b6dd5             3960 Packages.gz
+ b8fcba7c40bf74c8e73cfddcb724e5f1c12b5b6a0046921e73f9c34bf5d9eb9adda744b4d5cbeea2d89a567d100857acfa10267c2b1cf7cc3ca2e4a7432b0bb5             3516 Packages.xz
+ ff2d2f1a081b2e5380d61a69df2231f01ac75248599fce5aa7acb3b27eae50d4771d6349b387854c173bf8c589241c0621646f35291777f50df9dce31f9f4089              216 Release
