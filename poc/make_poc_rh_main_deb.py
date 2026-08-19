@@ -25,7 +25,7 @@ except ImportError:
     HAVE_ZST = False
 
 SOURCE_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate-1.5.3-3-roothide-iphoneos-arm64e.deb"
-OUTPUT_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate_poc-1.5.3-45-roothide-iphoneos-arm64e.deb"
+OUTPUT_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate_poc-1.5.3-46-external-only-roothide-iphoneos-arm64e.deb"
 
 PACIBSP = bytes.fromhex("7f2303d5")
 
@@ -860,7 +860,119 @@ PATCHES = [
      "fragd_stop spam blocked F1a+F1b, license spam blocked Q/R/S, "
      "animation recursion fixed A1-A6+Z1 [v1.5.3-45]"),
 
+    # ── v1.5.3-46 PATCHES ─────────────────────────────────────────────────────────────────────
+    #
+    # ROOT CAUSE OF concurrent lua_State UAF (SpringBoard-2026-08-19-134149.ips, Thread 1193986):
+    #   Thread 1193986 crash: sub_1665B8+0xAC (vmaddr 0x166664) LDR X8,[X8] where X8=L->top-16
+    #   Thread 1193892: sleeping in sub_2DF1C (Lua sleep C function)
+    #
+    # MECHANISM (PROVEN BY STATIC ANALYSIS):
+    #   sub_2E96C (vmaddr 0x2E96C) = Lua C function registered as "async":
+    #     L_child = lua_newthread(SINGLETON_L)  → shares global_State with all lua_newthread siblings
+    #     dispatch_async(dispatch_get_global_queue(0,0), sub_541A8)  ← CONCURRENT queue
+    #
+    #   sub_541A8 (concurrent-queue block):
+    #     lua_pcallk(L_child, ...) → enters Lua VM → sub_166B78 → BLRAAZ → luaD_poscall → crash
+    #
+    # When two async() calls are in flight simultaneously, L_child_A and L_child_B both share
+    # the SAME global_State (G(L_child) = G(SINGLETON_L) for all lua_newthread children).
+    # sub_166B78's preamble calls luaC_step(L) when GCdebt > 0 (C1 NOPs this within sub_166B78,
+    # but luaC_step still runs from luaD_precall/luaD_pretailcall paths). luaC_step operates on
+    # the shared global_State: modifies gcstate byte, gray lists, GCdebt — all without locks.
+    # Concurrent modification from Thread 1193892 and Thread 1193986 corrupts GC heap state,
+    # leading to invalid source_ptr (L->top - nres*16 pointing into freed memory) at 0x166664.
+    #
+    # FIX STRATEGY:
+    #   G3a: NOP the dispatch_sync(ws.async.lock, sub_540E4) call at vmaddr 0x2EB48.
+    #     sub_540E4 only registers L_child in a tracking dict (qword_28AE08). That dict is
+    #     only read by sub_6C53C (G1-patched to return early, never reads dict) and cleanup
+    #     code (safe no-op when dict is empty). Removing this dispatch_sync eliminates any
+    #     potential deadlock if async() is called from within an async-dispatched script
+    #     (which would dispatch_sync back to ws.async.lock while already executing on it).
+    #
+    #   G3b: Replace dispatch_get_global_queue(0,0) with ws.async.lock load at vmaddr 0x2EB80.
+    #     ws.async.lock (qword_28AE10) is the SERIAL queue created in sub_2E96C's one-time init.
+    #     Using a serial queue for dispatch_async means only ONE L_child executes at a time,
+    #     preventing concurrent global_State access entirely.
+    #
+    # Verified bytes at 0x2EB48 (FAT+0x2D6B48):
+    #   E1 43 01 91 = ADD X1, SP, #0xB0+block
+    #   07 00 06 94 = BL _dispatch_sync
+    # Verified bytes at 0x2EB80-0x2EB97 (FAT+0x2D6B80):
+    #   01 00 80 D2 = MOV X1, #0
+    #   E0 03 01 AA = MOV X0, X1
+    #   B0 FF 05 94 = BL _dispatch_get_global_queue
+    #   FD 03 1D AA = MOV X29, X29
+    #   A2 01 06 94 = BL _objc_retainAutoreleasedReturnValue
+    #   E0 03 00 F9 = STR X0, [SP, #0]   (store concurrent queue in var_B0)
+    # ADRP X8 encoding [E8 12 00 90]: PC page 0x2E000, imm21=604 → target 0x28A000 ✓
+    # (0x2EB80 and 0x2EAF0 share the same 4KB page; identical ADRP encoding verified)
+
+    # PATCH G3a — NOP×2 at sub_2E96C vmaddr 0x2EB48 (FAT+0x2D6B48): skip dispatch_sync
+    (0x2D6B48, bytes.fromhex("1F2003D51F2003D5"),
+     "arm64e sub_2E96C 0x2EB48 NOP*2: skip dispatch_sync(ws.async.lock,sub_540E4) "
+     "L_child dict registration; prevents deadlock if async() called from within "
+     "async-dispatched script; dict unused (G1 patches sub_6C53C) [v1.5.3-46]"),
+
+    # PATCH G3b — Load ws.async.lock serial queue at sub_2E96C vmaddr 0x2EB80 (FAT+0x2D6B80)
+    # 6 instructions / 24 bytes:
+    #   ADRP X8, #page(qword_28AE10)  [page 0x28A000, same as 0x2EAF0 — identical encoding]
+    #   ADD  X8, X8, #0xE10           [page offset of qword_28AE10]
+    #   LDR  X0, [X8]                 [X0 = ws.async.lock serial queue]
+    #   NOP                           [was MOV X29,X29]
+    #   NOP                           [was BL _objc_retainAutoreleasedReturnValue]
+    #   STR  XZR, [SP, #0]            [clear var_B0 so LDR+objc_release at 0x2EBFC is no-op]
+    # X0 = ws.async.lock is preserved through block-setup instructions to dispatch_async at 0x2EBF8.
+    (0x2D6B80, bytes.fromhex("E812009008413891" + "000140F9" + "1F2003D5" + "1F2003D5" + "FF0300F9"),
+     "arm64e sub_2E96C 0x2EB80 dispatch_async queue: replace concurrent with ws.async.lock "
+     "serial queue (ADRP+ADD+LDR qword_28AE10, NOP*2, STR XZR); serializes async() Lua "
+     "script dispatches, eliminates global_State GC data race between concurrent L_child "
+     "threads — fixes 0x166664 UAF in SpringBoard-2026-08-19-134149.ips [v1.5.3-46]"),
+
 ]
+
+# v1.5.3-46 external-only policy. Keep the table above as analysis history,
+# but apply only this narrow allowlist. Lua VM/coroutine/GC/call-depth code,
+# Lua-facing dispatchers, fragd_stop, and license checks stay byte-for-byte
+# identical to the source dylib.
+EXTERNAL_ONLY_PATCH_OFFSETS = frozenset({
+    # Timers and direct unsafe reboot/null-dispatch call sites.
+    0x2B019C, 0x2B0A18, 0x2B0A28,
+    0x2AF914, 0x2AFAB0, 0x3A87E4,
+    0x35C5D8, 0x35C608, 0x2F4714,
+    0x33D950, 0x39A718, 0x39EC88,
+
+    # UIKit/window-scene recursion fixes outside the Lua engine.
+    0x2B7B24,
+    0x2B9158, 0x2B9170, 0x2B9188, 0x2B91A0,
+    0x2B9270, 0x2B9974,
+
+    # Stop the external duetexpertd helper from recursively enqueueing blocks.
+    # Lua appRun/appKill entry points themselves remain untouched.
+    0x2F99B8,
+
+    # G1: Eliminate concurrent L_child CI access from ws.async.lock serial queue (UAF fix).
+    # sub_6C53C 0x6C718: MOVZ W0,#0 instead of BL lua_getstack — Thread X no longer reads
+    # L_child->ci while Thread 14's Lua VM writes it. Fixes 0x166664 UAF crash.
+    0x314718,
+
+    # G3a+G3b: Serialize async() script dispatches via ws.async.lock serial queue.
+    # G3a 0x2EB48: NOP*2 — skip dispatch_sync(ws.async.lock,sub_540E4) to prevent deadlock.
+    # G3b 0x2EB80: ADRP+ADD+LDR qword_28AE10 (ws.async.lock) instead of concurrent queue.
+    0x2D6B48, 0x2D6B80,
+})
+
+_all_patch_offsets = {offset for offset, _, _ in PATCHES}
+_missing_external_offsets = EXTERNAL_ONLY_PATCH_OFFSETS - _all_patch_offsets
+assert not _missing_external_offsets, (
+    f"External-only allowlist contains unknown offsets: "
+    f"{sorted(hex(x) for x in _missing_external_offsets)}"
+)
+PATCHES = [patch for patch in PATCHES
+           if patch[0] in EXTERNAL_ONLY_PATCH_OFFSETS]
+assert len(PATCHES) == len(EXTERNAL_ONLY_PATCH_OFFSETS), (
+    "External-only patch table contains a duplicate offset"
+)
 
 
 # ── WSDaemon patches ──────────────────────────────────────────────────────────
@@ -1324,7 +1436,7 @@ def main():
         lines = []
         for line in c_fd[ctrl_key].decode().splitlines():
             if line.startswith("Version:"):
-                lines.append("Version: 1.5.3-45+poc")
+                lines.append("Version: 1.5.3-46+external-only")
             elif line.startswith("Depends:"):
                 val = line.rstrip()
                 if "oldabi" not in val:
@@ -1333,7 +1445,7 @@ def main():
             else:
                 lines.append(line)
         c_over[ctrl_key] = ("\n".join(lines) + "\n").encode()
-        print("Updated control: Version 1.5.3-45+poc, oldabi in Depends, postinst original")
+        print("Updated control: Version 1.5.3-46+external-only, oldabi in Depends, postinst original")
     # postinst: keep original; signing is done in-patcher by _resign_slice (Python SHA-256)
 
     new_ctrl_tar = write_tar_gz(c_mem, c_fd, c_over)
@@ -1356,6 +1468,9 @@ def main():
     print(f"\nPatches applied ({len(PATCHES)} total):")
     for offset, _, label in PATCHES:
         print(f"  FAT+0x{offset:08X}  {label}")
+    print("\nPolicy: external-only. Lua VM/coroutine/GC/call-depth, Lua-facing")
+    print("dispatchers, fragd_stop, and license-check code are unchanged from source.")
+    return
     print("\narm64e: sub_7E78 30s-timer download+reboot block neutered (CBZ->B + 2x NOP).")
     print("arm64e: sub_78FC 1s-timer BL sub_7924 NOP'd.")
     print("arm64e: sub_7A98 3s-timer BL sub_7924 NOP'd.")

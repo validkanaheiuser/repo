@@ -184,11 +184,11 @@ Author: nvfrk
 Section: roothide
 Depends: ellekit, rootless-compat, zip, unzip, ldid, oldabi
 Architecture: iphoneos-arm64e
-Version: 1.5.3-38+poc
+Version: 1.5.3-46+external-only+poc
 Installed-Size: 5832
-Filename: pool/main/iphoneos-arm64e/com.fn.rh.iOSAutomate_poc-1.5.3-38-roothide-iphoneos-arm64e.deb
-Size: 2488998
-MD5sum: 3471ce858da446bffc85da02bc278699
-SHA1: 84d07e0ea4add410e6d4d1b0f9f9f037dc89b625
-SHA256: 4b7c3b88a69e1a55562574a0103ac2cb8b1f38f09cfecd73a6457e955b9a97aa
+Filename: pool/main/iphoneos-arm64e/com.fn.rh.iOSAutomate_poc-1.5.3-46-external-only-roothide-iphoneos-arm64e.deb
+Size: 2488992
+MD5sum: d1581b26a8b9447444f050e62b20cdf7
+SHA1: efa51b9a2c307d17e26e1cfe538f8ecc35f31b94
+SHA256: 5efeaa1338183a9e34bcb1a94aee43c03f1ddc6519f8049249d5f824e0e3148c
 
