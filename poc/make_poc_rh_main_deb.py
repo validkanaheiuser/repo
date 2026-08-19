@@ -25,7 +25,7 @@ except ImportError:
     HAVE_ZST = False
 
 SOURCE_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate-1.5.3-3-roothide-iphoneos-arm64e.deb"
-OUTPUT_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate_poc-1.5.3-46-external-only-roothide-iphoneos-arm64e.deb"
+OUTPUT_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate_poc-1.5.3-47-external-only-roothide-iphoneos-arm64e.deb"
 
 PACIBSP = bytes.fromhex("7f2303d5")
 
@@ -929,6 +929,48 @@ PATCHES = [
      "script dispatches, eliminates global_State GC data race between concurrent L_child "
      "threads — fixes 0x166664 UAF in SpringBoard-2026-08-19-134149.ips [v1.5.3-46]"),
 
+    # ── v1.5.3-47 PATCHES ─────────────────────────────────────────────────────────────────────
+    #
+    # ROOT CAUSE OF G3b-induced deadlocks (165834.ips + 170102.ips):
+    #
+    # G3b routes sub_541A8 (async() Lua block) onto ws.async.lock serial queue.
+    # sub_541A8 ITSELF calls dispatch_sync(ws.async.lock, sub_544BC) at vmaddr 0x543F4
+    # AFTER lua_pcallk returns (cleanup step: removes L_child from tracking dict).
+    # sub_541A8 is ON ws.async.lock → dispatch_sync to self → DEADLOCK.
+    # ws.async.lock is permanently blocked → sub_1C7FC (stopAllScripts) calls
+    # dispatch_sync(ws.async.lock, sub_6C53C) at vmaddr 0x1C920 on main thread →
+    # main thread also deadlocks → watchdog SIGTRAP → crash.
+    #
+    # 165834 crash: ws.async.lock thread hits dispatch_sync(ws.async.lock,sub_544BC) → deadlock.
+    # 170102 crash: main thread hits dispatch_sync(ws.async.lock,sub_6C53C) after ws.async.lock
+    #               is already permanently deadlocked by sub_541A8's dispatch_sync at 0x543F4.
+    #
+    # G4a FIX: NOP dispatch_sync(ws.async.lock, sub_544BC) at sub_541A8 vmaddr 0x543F4.
+    #   sub_544BC only removes L_child from qword_28AE08 dict — but G3a already skips dict
+    #   registration (sub_540E4 NOP'd at 0x2EB48), so dict is always empty → sub_544BC is
+    #   a no-op. Skipping the dispatch_sync is safe. dispatch_group_leave at 0x54404 still runs.
+    #   Original bytes: DD 69 05 94 (BL _dispatch_sync, verified by IDA get_bytes)
+    #
+    # G4b FIX: NOP dispatch_sync(ws.async.lock, sub_6C53C) at sub_1C7FC vmaddr 0x1C920.
+    #   G1 already patches sub_6C53C to MOVZ W0,#0 (return false immediately). Dispatching
+    #   it to ws.async.lock serves no purpose. NOP'ing this prevents main-thread blocking
+    #   when stopAllScripts is called while async() is executing on ws.async.lock.
+    #   Original bytes: 92 48 06 94 (BL _dispatch_sync, verified by IDA get_bytes)
+
+    # PATCH G4a — NOP BL _dispatch_sync at sub_541A8 vmaddr 0x543F4 (FAT+0x2FC3F4)
+    (0x2FC3F4, bytes.fromhex("1F2003D5"),
+     "arm64e sub_541A8 0x543F4 NOP BL _dispatch_sync (orig DD6905 94): skip "
+     "dispatch_sync(ws.async.lock,sub_544BC) post-pcallk cleanup; G3b made sub_541A8 run ON "
+     "ws.async.lock so dispatch_sync to self deadlocks; sub_544BC is no-op (G3a dict empty) "
+     "— fixes 165834 ws.async.lock deadlock [v1.5.3-47]"),
+
+    # PATCH G4b — NOP BL _dispatch_sync at sub_1C7FC vmaddr 0x1C920 (FAT+0x2C4920)
+    (0x2C4920, bytes.fromhex("1F2003D5"),
+     "arm64e sub_1C7FC 0x1C920 NOP BL _dispatch_sync (orig 924806 94): skip "
+     "dispatch_sync(ws.async.lock,sub_6C53C) in stopAllScripts path; G1 makes sub_6C53C "
+     "return 0 immediately so dispatch is a no-op; NOP prevents main-thread blocking while "
+     "async() Lua block occupies ws.async.lock — fixes 170102 main-thread deadlock [v1.5.3-47]"),
+
 ]
 
 # v1.5.3-46 external-only policy. Keep the table above as analysis history,
@@ -960,6 +1002,15 @@ EXTERNAL_ONLY_PATCH_OFFSETS = frozenset({
     # G3a 0x2EB48: NOP*2 — skip dispatch_sync(ws.async.lock,sub_540E4) to prevent deadlock.
     # G3b 0x2EB80: ADRP+ADD+LDR qword_28AE10 (ws.async.lock) instead of concurrent queue.
     0x2D6B48, 0x2D6B80,
+
+    # G4a+G4b: Fix G3b-induced deadlocks on ws.async.lock and main thread.
+    # G4a 0x543F4: NOP dispatch_sync(ws.async.lock,sub_544BC) in sub_541A8 post-pcallk
+    #              cleanup — sub_541A8 runs ON ws.async.lock (G3b), so dispatch_sync to self
+    #              deadlocks; sub_544BC is a no-op anyway (G3a keeps dict empty).
+    # G4b 0x1C920: NOP dispatch_sync(ws.async.lock,sub_6C53C) in sub_1C7FC (stopAllScripts)
+    #              — sub_6C53C already returns 0 (G1); prevents main-thread blocking while
+    #              async() occupies ws.async.lock.
+    0x2FC3F4, 0x2C4920,
 })
 
 _all_patch_offsets = {offset for offset, _, _ in PATCHES}
