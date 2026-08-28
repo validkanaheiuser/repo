@@ -24,8 +24,14 @@ try:
 except ImportError:
     HAVE_ZST = False
 
+# Single source of truth for the PoC version. Bump this ONLY — the output .deb
+# filename and the control Version line are derived from it below, so they can
+# never drift out of sync (root cause of the 1.5.3-46 vs -47 filename mismatch).
+POC_VERSION = "1.5.3-48"
+POC_TAG = "external-only"
+
 SOURCE_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate-1.5.3-3-roothide-iphoneos-arm64e.deb"
-OUTPUT_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate_poc-1.5.3-47-external-only-roothide-iphoneos-arm64e.deb"
+OUTPUT_DEB = rf"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate_poc-{POC_VERSION}-{POC_TAG}-roothide-iphoneos-arm64e.deb"
 
 PACIBSP = bytes.fromhex("7f2303d5")
 
@@ -971,6 +977,52 @@ PATCHES = [
      "return 0 immediately so dispatch is a no-op; NOP prevents main-thread blocking while "
      "async() Lua block occupies ws.async.lock — fixes 170102 main-thread deadlock [v1.5.3-47]"),
 
+    # ── v1.5.3-48 PATCHES ─────────────────────────────────────────────────────────────────────
+    #
+    # G5: sub_16ABAC (vmaddr 0x16ABAC, FAT+0x412BAC) self-integrity crash.
+    #   luaC_step calls sub_16ABAC every 128 GC steps via counter dword_28B850.
+    #   sub_16ABAC PACIA-signs its own VA (ADRL X16; PACIA X16, X8=0) then immediately
+    #   LDR W8,[X8] where X8 = PAC-signed addr → Translation fault on arm64e A12 unconditionally.
+    #   Confirmed by SpringBoard-2026-08-29-022601.ips: EXC_BAD_ACCESS SIGSEGV
+    #     "possible pointer authentication failure", FAR=0x404EDE8102E12BAC (PAC-signed),
+    #     PC=img[13]+0x16ABC8 (sub_16ABAC+0x1C), LR=img[13]+0x16A7EC (luaC_step+204),
+    #     queue com.apple.root.default-qos. sub_16ABAC has NO PACIBSP — patch from start.
+    #   MOVZ W0,#999 = return value "ok" (13=tampered); RET = plain return (no PACIBSP).
+    #   luaC_step: result!=13 → XOR update path runs (ws_5bdbfea197ae33f4 stays valid).
+    (0x412BAC, bytes.fromhex("E07C8052C0035FD6"),
+     "arm64e sub_16ABAC 0x16ABAC: MOVZ W0,#999;RET — bypass PACIA self-integrity crash "
+     "(Translation fault every 128 Lua GC steps; 022601.ips PC=0x16ABC8 FAR=PAC-tagged) [v1.5.3-48]"),
+
+    # TG1: sub_97BF4 /api/tg/status handler (vmaddr 0x97D88, FAT+0x33FD88) always-licensed.
+    #   TBZ W8,#0,loc_97F20 at 0x97D88: bit0==0 (not licensed) → Branch 3 path
+    #   {licensed:false, hits:sub_9844C(), limit:100, locked:hits>=100}.
+    #   NOP replaces TBZ → execution always falls through to Branch 1 (local PBKDF2 check)
+    #   which continues into Branch 2 (server licensed path) — dashboard sees licensed:true.
+    (0x33FD88, bytes.fromhex("1F2003D5"),
+     "arm64e sub_97BF4 0x97D88: TBZ W8,#0->NOP — /api/tg/status always takes licensed path "
+     "(bit0==0 branch to not-licensed block eliminated) [v1.5.3-48]"),
+
+    # TG2: sub_825AC (vmaddr 0x825AC, FAT+0x32A5AC) periodic license-check timer disabled.
+    #   PACIBSP at +0 (0x825AC, kept); SUB SP,SP,#0x20 at +4 (0x825B0, patched to RETAB).
+    #   sub_825AC calls dispatch_once(qword_28B050, stru_222D30) to start the periodic
+    #   license-check timer. RETAB at +4 → early return before dispatch_once runs.
+    (0x32A5B0, bytes.fromhex("FF0F5FD6"),
+     "arm64e sub_825AC 0x825B0: SUB SP->RETAB — prevent periodic license-check dispatch_once [v1.5.3-48]"),
+
+    # TG3a: sub_298FC objc_call Lua gate (vmaddr 0x2A4BC, FAT+0x2D24BC) always-licensed.
+    #   TBNZ W8,#0,loc_2A4EC at 0x2A4BC: bit0==1 (licensed) → branch to 0x2A4EC (impl).
+    #   Fall-through 0x2A4C0: lua_pushnil + "objc_call: not licensed" + return 2.
+    #   Replace TBNZ with B loc_2A4EC (B imm26=12, offset=0x30) → always takes impl path.
+    (0x2D24BC, bytes.fromhex("0C000014"),
+     "arm64e sub_298FC 0x2A4BC: TBNZ W8,#0->B loc_2A4EC (imm26=12) — objc_call always licensed [v1.5.3-48]"),
+
+    # TG3b: sub_2AF18 objc_observe Lua gate (vmaddr 0x2B0B8, FAT+0x2D30B8) always-licensed.
+    #   TBNZ W8,#0,loc_2B0E0 at 0x2B0B8: bit0==1 (licensed) → branch to 0x2B0E0 (impl).
+    #   Fall-through 0x2B0BC: lua_pushnil + "objc_observe: not licensed" + return 2.
+    #   Replace TBNZ with B loc_2B0E0 (B imm26=10, offset=0x28) → always takes impl path.
+    (0x2D30B8, bytes.fromhex("0A000014"),
+     "arm64e sub_2AF18 0x2B0B8: TBNZ W8,#0->B loc_2B0E0 (imm26=10) — objc_observe always licensed [v1.5.3-48]"),
+
 ]
 
 # v1.5.3-46 external-only policy. Keep the table above as analysis history,
@@ -1011,6 +1063,14 @@ EXTERNAL_ONLY_PATCH_OFFSETS = frozenset({
     #              — sub_6C53C already returns 0 (G1); prevents main-thread blocking while
     #              async() occupies ws.async.lock.
     0x2FC3F4, 0x2C4920,
+
+    # v1.5.3-48: G5 crash fix + Trial Gate removal.
+    # G5 0x16ABAC: MOVZ W0,#999;RET — bypass sub_16ABAC PACIA self-integrity crash (every 128 GC steps).
+    # TG1 0x97D88: TBZ->NOP — /api/tg/status always takes licensed path.
+    # TG2 0x825B0: SUB SP->RETAB — prevent periodic license-check timer from starting.
+    # TG3a 0x2A4BC: TBNZ->B — objc_call always takes licensed impl path.
+    # TG3b 0x2B0B8: TBNZ->B — objc_observe always takes licensed impl path.
+    0x412BAC, 0x33FD88, 0x32A5B0, 0x2D24BC, 0x2D30B8,
 })
 
 _all_patch_offsets = {offset for offset, _, _ in PATCHES}
@@ -1487,7 +1547,7 @@ def main():
         lines = []
         for line in c_fd[ctrl_key].decode().splitlines():
             if line.startswith("Version:"):
-                lines.append("Version: 1.5.3-47+external-only")
+                lines.append(f"Version: {POC_VERSION}+{POC_TAG}")
             elif line.startswith("Depends:"):
                 val = line.rstrip()
                 if "oldabi" not in val:
@@ -1496,7 +1556,7 @@ def main():
             else:
                 lines.append(line)
         c_over[ctrl_key] = ("\n".join(lines) + "\n").encode()
-        print("Updated control: Version 1.5.3-47+external-only, oldabi in Depends, postinst original")
+        print(f"Updated control: Version {POC_VERSION}+{POC_TAG}, oldabi in Depends, postinst original")
     # postinst: keep original; signing is done in-patcher by _resign_slice (Python SHA-256)
 
     new_ctrl_tar = write_tar_gz(c_mem, c_fd, c_over)
