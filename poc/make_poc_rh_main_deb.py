@@ -25,7 +25,7 @@ except ImportError:
     HAVE_ZST = False
 
 SOURCE_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate-1.5.3-3-roothide-iphoneos-arm64e.deb"
-OUTPUT_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate_poc-1.5.3-51-external-only-roothide-iphoneos-arm64e.deb"
+OUTPUT_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate_poc-1.5.3-52-external-only-roothide-iphoneos-arm64e.deb"
 
 PACIBSP = bytes.fromhex("7f2303d5")
 
@@ -1113,6 +1113,59 @@ PATCHES = [
      "ptr — accessing controller[8]/[0] would crash; B jumps to sleep-chunk dispatch at 0x2E3BC "
      "so loop still sleeps full duration in 50ms chunks [v1.5.3-51]"),
 
+    # ── v1.5.3-52 PATCHES ─────────────────────────────────────────────────────────────────────
+    #
+    # ROOT CAUSE OF "safe mode while running Lua" (SpringBoard-2026-08-29-063030.ips):
+    # SC3a/SC3b fixed the sleep() UAF. New crash: ESR=0x56000080 (Address size fault, write),
+    # FAR=0x12EC34000 — identical fault class, different garbage value from freed controller.
+    # faultingThread=0 (main thread, in mach_msg), no ws.async.lock thread visible (Lua thread
+    # exited before crash reporter captured it — crash is fast, no sleep to hold the thread alive).
+    #
+    # CRASH LOCATION — sub_24360 (tap) at 0x243AC/0x243C8 (same pattern in doubleTap/touchDown/
+    # touchMove/touchUp/swipe):
+    #   0x243AC  LDR X8, [X8]        ; *controller → garbage from freed heap (e.g. 0x12EC34000)
+    #   0x243C8  LDRB W8, [X8]       ; ← CRASH: deref 0x12EC34000 → Address size fault
+    # All 6 touch functions have identical entry guard:
+    #   LDUR X8, [X8,#-8]   ; controller = *(lua_state-8)
+    #   CBZ X8, loc_+0x18   ; if NULL → execute (C8 00 00 B4, imm19=6) at fn+0x1C
+    # If controller is freed mid-execution, *controller = garbage → LDRB from garbage → fault.
+    #
+    # FIX — SC4a–SC4f: Replace CBZ X8, loc_+0x18 (C8 00 00 B4) with B loc_+0x18 (06 00 00 14)
+    # at fn+0x1C for each of the 6 touch functions. Unconditional branch → always execute action,
+    # all controller stop-condition checks skipped. Consequence: touch actions execute even after
+    # stop signal, but no crash. Verified original bytes at all 6 offsets: C8 00 00 B4 ✓
+
+    # SC4a — B loc_+0x18 at sub_24360 (tap) fn+0x1C 0x2437C (FAT+0x2CB37C)
+    (0x2CB37C, bytes.fromhex("06000014"),
+     "arm64e sub_24360 tap() 0x2437C CBZ X8→B loc_24394 (orig C80000B4): skip stop-cond "
+     "entry guard; freed controller UAF at 0x243AC LDR+0x243C8 LDRB → FAR=0x12EC34000 "
+     "Address size fault; B always executes tap regardless of stop signal [v1.5.3-52]"),
+
+    # SC4b — B loc_+0x18 at sub_24468 (doubleTap) fn+0x1C 0x24484 (FAT+0x2CC484)
+    (0x2CC484, bytes.fromhex("06000014"),
+     "arm64e sub_24468 doubleTap() 0x24484 CBZ X8→B (orig C80000B4): skip stop-cond entry "
+     "guard — same freed controller UAF pattern as tap(); always executes [v1.5.3-52]"),
+
+    # SC4c — B loc_+0x18 at sub_24588 (touchDown) fn+0x1C 0x245A4 (FAT+0x2CC5A4)
+    (0x2CC5A4, bytes.fromhex("06000014"),
+     "arm64e sub_24588 touchDown() 0x245A4 CBZ X8→B (orig C80000B4): skip stop-cond entry "
+     "guard — same freed controller UAF pattern; always executes [v1.5.3-52]"),
+
+    # SC4d — B loc_+0x18 at sub_24708 (touchMove) fn+0x1C 0x24724 (FAT+0x2CC724)
+    (0x2CC724, bytes.fromhex("06000014"),
+     "arm64e sub_24708 touchMove() 0x24724 CBZ X8→B (orig C80000B4): skip stop-cond entry "
+     "guard — same freed controller UAF pattern; always executes [v1.5.3-52]"),
+
+    # SC4e — B loc_+0x18 at sub_2486C (touchUp) fn+0x1C 0x24888 (FAT+0x2CC888)
+    (0x2CC888, bytes.fromhex("06000014"),
+     "arm64e sub_2486C touchUp() 0x24888 CBZ X8→B (orig C80000B4): skip stop-cond entry "
+     "guard — same freed controller UAF pattern; always executes [v1.5.3-52]"),
+
+    # SC4f — B loc_+0x18 at sub_249B0 (swipe) fn+0x1C 0x249CC (FAT+0x2CC9CC)
+    (0x2CC9CC, bytes.fromhex("06000014"),
+     "arm64e sub_249B0 swipe() 0x249CC CBZ X8→B (orig C80000B4): skip stop-cond entry "
+     "guard — same freed controller UAF pattern; always executes [v1.5.3-52]"),
+
 ]
 
 # v1.5.3-46 external-only policy. Keep the table above as analysis history,
@@ -1170,6 +1223,12 @@ EXTERNAL_ONLY_PATCH_OFFSETS = frozenset({
     # SC3a 0x2E2A8: CBZ X8→B loc_2E2C4 in sub_2DF1C sleep loop — skip Check 1 (triple-deref UAF).
     # SC3b 0x2E310: LDR X8→B loc_2E3BC in sub_2DF1C sleep loop — skip Check 2 + inner pause loop.
     0x2D62A8, 0x2D6310,
+
+    # v1.5.3-52: Lua touch-function use-after-free fix — freed controller UAF in entry guard.
+    # SC4a–SC4f 0x2437C/0x24484/0x245A4/0x24724/0x24888/0x249CC: CBZ X8→B at fn+0x1C in
+    # tap/doubleTap/touchDown/touchMove/touchUp/swipe — skip stop-condition entry guard.
+    # All 6 have identical orig C8 00 00 B4; patch 06 00 00 14 (B imm26=6, same target).
+    0x2CB37C, 0x2CC484, 0x2CC5A4, 0x2CC724, 0x2CC888, 0x2CC9CC,
 })
 
 _all_patch_offsets = {offset for offset, _, _ in PATCHES}
@@ -1646,7 +1705,7 @@ def main():
         lines = []
         for line in c_fd[ctrl_key].decode().splitlines():
             if line.startswith("Version:"):
-                lines.append("Version: 1.5.3-51+external-only")
+                lines.append("Version: 1.5.3-52+external-only")
             elif line.startswith("Depends:"):
                 val = line.rstrip()
                 if "oldabi" not in val:
@@ -1655,7 +1714,7 @@ def main():
             else:
                 lines.append(line)
         c_over[ctrl_key] = ("\n".join(lines) + "\n").encode()
-        print("Updated control: Version 1.5.3-51+external-only, oldabi in Depends, postinst original")
+        print("Updated control: Version 1.5.3-52+external-only, oldabi in Depends, postinst original")
     # postinst: keep original; signing is done in-patcher by _resign_slice (Python SHA-256)
 
     new_ctrl_tar = write_tar_gz(c_mem, c_fd, c_over)

@@ -1,3 +1,100 @@
+Package: com.nvfrk.rl.Remote
+Name: Remote
+Description: fn [PoC]
+Maintainer: fn
+Depiction: https://kiiimrepo.com/repo/SileoDepic.php?info=Remote_1.5.3-3_iphoneos-arm64
+SileoDepiction: https://kiiimrepo.com/repo/SileoDepic.php?info=Remote_1.5.3-3_iphoneos-arm64
+Author: nvfrk
+Section: rootless
+Depends: ellekit
+Architecture: iphoneos-arm64
+Version: 1.5.3-3-rootless+poc
+Installed-Size: 1780
+Filename: pool/main/iphoneos-arm64/com.fn.rl.Remote_poc-1.5.3-3-rootless-iphoneos-arm64.deb
+Size: 696594
+MD5sum: a55fa69822df02105e406eb8e2a48431
+SHA1: bb9e5f446e98a3a6a8aa3825e088b7ee96e21a05
+SHA256: fa02213b2a7f7f94d2e077783bfedc0798ceb61ec974f1eb545b9dc8e38ec62a
+
+Package: com.nvfrk.rl.iOSAutomateEcosystem
+Name: iOSAutomateEcosystem
+Description: from iOSAutomate.com
+Maintainer: fn
+Depiction: https://kiiimrepo.com/repo/SileoDepic.php?info=iOSAutomateEcosystem_1.0.8-2_iphoneos-arm64
+SileoDepiction: https://kiiimrepo.com/repo/SileoDepic.php?info=iOSAutomateEcosystem_1.0.8-2_iphoneos-arm64
+Author: nvfrk
+Section: rootless
+Depends: ellekit, com.nvfrk.rl.iosautomate, com.nvfrk.rl.remote
+Architecture: iphoneos-arm64
+Version: 1.0.8-2-rootless
+Installed-Size: 120
+Filename: pool/main/iphoneos-arm64/com.fn.rl.iOSAutomateEcosystem-1.0.8-2-rootless-iphoneos-arm64.deb
+Size: 1988
+MD5sum: 46252b817b1c8a60dc4ba2d277d685ab
+SHA1: 531759781c8ad3ed5f0b4c40a938765541fe09f4
+SHA256: e3e21f401ee18d39c442d5aac835ed9c4fa5aa3d9f7886ca8fb6c1c2d8121fe1
+
+Package: com.nvfrk.rl.iOSAutomate
+Name: iOSAutomate
+Description: Simple and optimized! [PoC - license bypass]
+ All in ~1 MB file size and ~3 MB on disk.
+  - ⭕ BIG UPDATE: MCP got a brain. Master Prompt. New tools. It knows what you want before you do !
+ - Add Store Scripts with multiple badges: Free, Paid, Your Scripts, and App filter.
+ - Add clearLocation, fakeLocation function to change system-wide location.
+ - Add support set proxy with format: ip:port:user:pwd
+ - Add support api to run stop_running, start_running .ate, .lua, .fna file.
+ - Add update for appInfo, table.tostring and optimize CPU,RAM for launching app.
+ - Add modern dialog - intelligent for tool UI, best for code sell tool to others.
+ - Add async(function_name), stop() - for main thread, stopAsync(), stopAll().
+ - Add strip fnrr for old-system CloudiPhone.
+ - Add support socket.http,ssl & ltn12, wget, curl with best performance.
+ - Add smart indicator for image path and region in script with real-time preview.
+ - Add real-time RAM, CPU, and storage stats overlay for script performance monitoring.
+ - Add support for all Plus models (rarely used in farm setups).
+ - Add ZOMBIE MODE for Big Farm, as CloudiPhone.
+ - Add optimize and support both LUA 5.3 & 5.4.
+ - Add speedup & optimize for ORC, findImage.
+ - ⭕ BIG UPDATE: MCP with more POWERFULL, AI Agentic can see anything !
+ - Add 2 button: findText, tapText to OCR helper.
+ - Add update AI PROMPT with more function & MCP config guide for AI agentic.
+ - Add CleanAllAcc(bundle_id), deleteAcc(bundle_id,accname) - BE CAREFUL TO USE !
+ - Add new method for get Cookie/token (EXTRA-Paid)
+ - Add Dark/Light toggle to top of IDE.
+ - Add module system: require() now resolves correctly.
+ - Add one-click Backup button in Web IDE: exports all scripts as a timestamped zip.
+ - Add multi-method input pipeline for text injection.
+ - Add User-defined output directory for image crop (findImage).
+ - ⭕ BIG UPDATE (BASIC-Paid): resetApp(bundleID), openAcc(bundleID, accname), restoreAcc(bundleID, accname), backupAcc(bundleID, accname). With these functions you can farm iOS for feeding bulk accounts (only need openAcc() func) or register accounts (with feeding after that if you want).
+ - Add more functions and APIs.
+ - add OpeniOSAutomate(tab_index), CloseiOSAutomate() for floating button.
+ - Add MCP server (SSE) for AI agent at localIP:port/sse (self-setup, no author support).
+ - Add current line indicator for autolaunch script.
+ - Add more detail for changelog.
+ - Add execute('reboot').
+ - Add check key active online/offline.
+ - Add syntax check in realtime.
+ - Add getCookie(): cookie-token.
+ - Add AI Prompt, Apps button in IDE.
+ - Add all helpers: coord, getColor, findColor(s),
+   findImage, OCR, Zoom.
+ - Add floating button on phone, no need PC/browser.
+ - Add 20+ local APIs, supports port-forward for farms.
+ - Initial release: over 60 functions & IDE (PC/Mobile).
+Maintainer: fn
+Depiction: https://kiiimrepo.com/repo/SileoDepic.php?info=iOSAutomate_1.5.3-4_iphoneos-arm64
+SileoDepiction: https://kiiimrepo.com/repo/SileoDepic.php?info=iOSAutomate_1.5.3-4_iphoneos-arm64
+Author: nvfrk
+Section: rootless
+Depends: ellekit, zip, unzip, ldid
+Architecture: iphoneos-arm64
+Version: 1.5.3-4-rootless+poc
+Installed-Size: 5848
+Filename: pool/main/iphoneos-arm64/com.fn.rl.iOSAutomate_poc-1.5.3-4-rootless-iphoneos-arm64.deb
+Size: 2491730
+MD5sum: 3b0547fa4c718c78c5cb90fecc2d7266
+SHA1: 13c85601c059a942879f365d4bd0cf9b268cd821
+SHA256: 871a6c0817856f481e049d1ea368d447d53c0e5ecc0a675c26747d8daa6976c1
+
 Package: com.nvfrk.rh.Remote
 Name: Remote
 Description: fn [PoC]
@@ -87,11 +184,11 @@ Author: nvfrk
 Section: roothide
 Depends: ellekit, rootless-compat, zip, unzip, ldid, oldabi
 Architecture: iphoneos-arm64e
-Version: 1.5.3-50+external-only
+Version: 1.5.3-52+external-only
 Installed-Size: 5832
-Filename: pool/main/iphoneos-arm64e/com.fn.rh.iOSAutomate_poc-1.5.3-50-external-only-roothide-iphoneos-arm64e.deb
-Size: 2489002
-MD5sum: ec5401e731cb8262c51be533012feedd
-SHA1: 5457c964e5f7d70ca941253d904eb3063c042bd0
-SHA256: 0dcace28311d9e9312a12cd656453793cd435156ce7abeabafc02230bd58c33f
+Filename: pool/main/iphoneos-arm64e/com.fn.rh.iOSAutomate_poc-1.5.3-52-external-only-roothide-iphoneos-arm64e.deb
+Size: 2489008
+MD5sum: 85e4cf04016f445999e9704ea2f9f4d8
+SHA1: 3db2e79e4128bda8173c83cb5b73ebcaf5172bb7
+SHA256: 8292cdf1f50218b221f383c2b1a44de839ffb68ca89936e82f3832f6f1e78130
 
