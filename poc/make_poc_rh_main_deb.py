@@ -27,7 +27,7 @@ except ImportError:
 # Single source of truth for the PoC version. Bump this ONLY — the output .deb
 # filename and the control Version line are derived from it below, so they can
 # never drift out of sync (root cause of the 1.5.3-46 vs -47 filename mismatch).
-POC_VERSION = "1.5.3-48"
+POC_VERSION = "1.5.3-49"
 POC_TAG = "external-only"
 
 SOURCE_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate-1.5.3-3-roothide-iphoneos-arm64e.deb"
@@ -1023,6 +1023,27 @@ PATCHES = [
     (0x2D30B8, bytes.fromhex("0A000014"),
      "arm64e sub_2AF18 0x2B0B8: TBNZ W8,#0->B loc_2B0E0 (imm26=10) — objc_observe always licensed [v1.5.3-48]"),
 
+    # ── v1.5.3-49 PATCHES ─────────────────────────────────────────────────────────────────────
+    #
+    # TG1b: sub_98FA0 GET / main page handler trial gate (vmaddr 0x99408, FAT+0x341408).
+    # sub_98FA0 is the GCDWebServer handler for GET /. It has its OWN license check,
+    # completely independent of sub_97BF4 (/api/tg/status). Full decompile confirmed:
+    #   - PBKDF2 check → v53; server check → v54 (licensed flag)
+    #   - v49 = (sub_9844C() >= 100) — locked flag (hits exhausted)
+    #   - At vmaddr 0x99404-0x99410:
+    #       99404: LDURB W8, [X29,#var_9A]       ; W8 = v54 (licensed)
+    #       99408: TBNZ W8, #0, loc_994D4        ; if licensed → IDE path
+    #       9940C: LDURB W8, [X29,#var_B2]       ; W8 = v49 (locked)
+    #       99410: TBZ  W8, #0, loc_994D4        ; if not locked → IDE path
+    #       99414: ADRP X8, ...                   ; ← Trial expired CSS (served when !v54 && v49)
+    # Fix: change TBNZ at 0x99408 → B loc_994D4 (unconditional branch to IDE path).
+    # B encoding: offset = 0x994D4 - 0x99408 = 0xCC; imm26 = 0xCC/4 = 0x33
+    #   0x14000033 → LE bytes: 33 00 00 14
+    # Verified: bytes at FAT+0x341408 = 68 06 00 37 (TBNZ W8, #0, +0xCC) ✓
+    (0x341408, bytes.fromhex("33000014"),
+     "arm64e sub_98FA0 0x99408: TBNZ W8,#0->B loc_994D4 (imm26=0x33) — GET / always serves IDE path "
+     "(main page handler own license check; TG1 only fixed /api/tg/status, not GET /) [v1.5.3-49]"),
+
 ]
 
 # v1.5.3-46 external-only policy. Keep the table above as analysis history,
@@ -1071,6 +1092,11 @@ EXTERNAL_ONLY_PATCH_OFFSETS = frozenset({
     # TG3a 0x2A4BC: TBNZ->B — objc_call always takes licensed impl path.
     # TG3b 0x2B0B8: TBNZ->B — objc_observe always takes licensed impl path.
     0x412BAC, 0x33FD88, 0x32A5B0, 0x2D24BC, 0x2D30B8,
+
+    # v1.5.3-49: TG1b main page handler trial gate bypass.
+    # TG1b 0x99408: TBNZ W8,#0->B loc_994D4 — GET / always serves IDE path.
+    # sub_98FA0 (GET / handler) has own license check; TG1 only fixed /api/tg/status.
+    0x341408,
 })
 
 _all_patch_offsets = {offset for offset, _, _ in PATCHES}
