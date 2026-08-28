@@ -25,7 +25,7 @@ except ImportError:
     HAVE_ZST = False
 
 SOURCE_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate-1.5.3-3-roothide-iphoneos-arm64e.deb"
-OUTPUT_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate_poc-1.5.3-48-external-only-roothide-iphoneos-arm64e.deb"
+OUTPUT_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate_poc-1.5.3-49-external-only-roothide-iphoneos-arm64e.deb"
 
 PACIBSP = bytes.fromhex("7f2303d5")
 
@@ -1001,6 +1001,53 @@ PATCHES = [
      "arm64e sub_98FA0 0x99408 TBNZ W8,#0 → B loc_994D4 (orig 68060037): GET / always "
      "serves IDE HTML, bypassing PBKDF2+hit-count trial gate in main page handler [v1.5.3-48]"),
 
+    # ── v1.5.3-49 PATCHES ─────────────────────────────────────────────────────────────────────
+    #
+    # ROOT CAUSE: Screen capture timer (sub_B668C) creates dispatch_source_t on _dispatch_main_q.
+    # This causes CARenderServerRenderDisplay (blocking mach_msg IPC) to run on the MAIN THREAD
+    # every 100ms, which:
+    #   1. Blocks touch event processing → tap() fails
+    #   2. Delays main-run-loop Lua timer callbacks → Lua timing wrong
+    #   3. Accumulates VM pressure (pmap_enter resource shortage) → SpringBoard crash after hours
+    #
+    # SC1: sub_B668C 0xB66A4 — swap _dispatch_main_q for dispatch_get_global_queue(0,0)
+    #   Original 6 instructions (ADRP+LDR main_q + retain×2 + MOV X3,X0) at vmaddr 0xB66A4:
+    #     48 0B 00 D0  — ADRP X8, __dispatch_main_q_ptr@PAGE
+    #     00 21 47 F9  — LDR  X0, [X8, __dispatch_main_q_ptr@PAGEOFF]
+    #     D7 E2 03 94  — BL   _objc_retainAutoreleaseReturnValue
+    #     FD 03 1D AA  — MOV  X29, X29  (NOP)
+    #     D9 E2 03 94  — BL   _objc_retainAutoreleasedReturnValue
+    #     E3 03 00 AA  — MOV  X3, X0
+    #   Replacement:
+    #     00 00 80 D2  — MOVZ X0, #0    (identifier = QOS_CLASS_DEFAULT)
+    #     01 00 80 D2  — MOVZ X1, #0    (flags = 0)
+    #     E9 E0 03 94  — BL   _dispatch_get_global_queue  (stub vmaddr 0x1AEA50; offset 0xF83A4)
+    #     E3 03 00 AA  — MOV  X3, X0    (X3 = background queue for dispatch_source_create)
+    #     1F 20 03 D5  — NOP
+    #     1F 20 03 D5  — NOP
+    #   Verified original bytes at FAT+0x35E6A4: 48 0B 00 D0 00 21 47 F9 D7 E2 03 94
+    #                                             FD 03 1D AA D9 E2 03 94 E3 03 00 AA ✓
+    (0x35E6A4, bytes.fromhex("000080D2010080D2E9E00394E30300AA1F2003D51F2003D5"),
+     "arm64e sub_B668C 0xB66A4 dispatch_source_create queue: _dispatch_main_q → "
+     "dispatch_get_global_queue(0,0) (orig 480B00D0002147F9...E30300AA): timer fires on "
+     "background thread so CARenderServerRenderDisplay no longer blocks main thread; "
+     "fixes tap()/Lua-timing/VM-exhaustion crash [v1.5.3-49]"),
+
+    # SC2: ws_lua_capture_screen 0x7EBC8 — NOP TBZ that routes to dispatch_sync(main_queue,…)
+    #   When called from a background thread (after SC1), ws_lua_capture_screen checks
+    #   isMainThread: if NO → dispatch_sync(main_queue, entire_sub_7ECF4), which still
+    #   blocks the main thread for the full render IPC duration.
+    #   Fix: NOP the TBZ so the function ALWAYS takes the direct-call path (BLRAA X8,X9),
+    #   calling sub_7ECF4 directly on the calling (background) thread.
+    #   sub_7ECF4 internally dispatch_syncs to main only for UIScreen size query (< 0.1 ms);
+    #   CARenderServerRenderDisplay then runs on the background thread without blocking main.
+    #   Original at vmaddr 0x7EBC8: TBZ W8, #0, loc_7EC04 (E8 01 00 36)
+    #   Verified original bytes at FAT+0x326BC8: E8 01 00 36 ✓
+    (0x326BC8, bytes.fromhex("1F2003D5"),
+     "arm64e ws_lua_capture_screen 0x7EBC8 NOP TBZ W8,#0 (orig E8010036): always calls "
+     "sub_7ECF4 directly on calling thread instead of dispatch_sync to main; paired with SC1 "
+     "so CARenderServerRenderDisplay runs on background thread [v1.5.3-49]"),
+
 ]
 
 # v1.5.3-46 external-only policy. Keep the table above as analysis history,
@@ -1046,6 +1093,11 @@ EXTERNAL_ONLY_PATCH_OFFSETS = frozenset({
     # TG1  0x97D88: NOP TBZ W8,#0 in sub_97BF4 (GET /api/tg/status) → always returns {licensed:true}.
     # TG1b 0x99408: TBNZ→B in sub_98FA0 (GET /) → always serves IDE HTML, bypasses trial gate.
     0x33FD88, 0x341408,
+
+    # v1.5.3-49: Screen capture thread fix — move render IPC off main thread.
+    # SC1  0xB66A4: dispatch_source timer queue _dispatch_main_q → dispatch_get_global_queue(0,0).
+    # SC2  0x7EBC8: NOP TBZ in ws_lua_capture_screen → always call sub_7ECF4 directly on caller thread.
+    0x35E6A4, 0x326BC8,
 })
 
 _all_patch_offsets = {offset for offset, _, _ in PATCHES}
@@ -1522,7 +1574,7 @@ def main():
         lines = []
         for line in c_fd[ctrl_key].decode().splitlines():
             if line.startswith("Version:"):
-                lines.append("Version: 1.5.3-48+external-only")
+                lines.append("Version: 1.5.3-49+external-only")
             elif line.startswith("Depends:"):
                 val = line.rstrip()
                 if "oldabi" not in val:
@@ -1531,7 +1583,7 @@ def main():
             else:
                 lines.append(line)
         c_over[ctrl_key] = ("\n".join(lines) + "\n").encode()
-        print("Updated control: Version 1.5.3-48+external-only, oldabi in Depends, postinst original")
+        print("Updated control: Version 1.5.3-49+external-only, oldabi in Depends, postinst original")
     # postinst: keep original; signing is done in-patcher by _resign_slice (Python SHA-256)
 
     new_ctrl_tar = write_tar_gz(c_mem, c_fd, c_over)
