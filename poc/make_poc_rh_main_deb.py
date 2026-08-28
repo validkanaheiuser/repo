@@ -25,7 +25,7 @@ except ImportError:
     HAVE_ZST = False
 
 SOURCE_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate-1.5.3-3-roothide-iphoneos-arm64e.deb"
-OUTPUT_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate_poc-1.5.3-50-external-only-roothide-iphoneos-arm64e.deb"
+OUTPUT_DEB = r"C:\Users\Hello\Downloads\iosautomate\com.fn.rh.iOSAutomate_poc-1.5.3-51-external-only-roothide-iphoneos-arm64e.deb"
 
 PACIBSP = bytes.fromhex("7f2303d5")
 
@@ -1053,6 +1053,66 @@ PATCHES = [
      "sub_7ECF4 directly on calling thread instead of dispatch_sync to main; paired with SC1 "
      "so CARenderServerRenderDisplay runs on background thread [v1.5.3-50]"),
 
+    # ── v1.5.3-51 PATCHES ─────────────────────────────────────────────────────────────────────
+    #
+    # ROOT CAUSE OF "safe mode while running Lua" (SpringBoard-2026-08-29-060505.ips):
+    # Thread[2] (ws.async.lock = Lua exec thread), 511 frames:
+    #   frame[0]: dylib+0x2E2B8 (inside sub_2DF1C, CRASH)
+    #   frame[1]: dylib+0x166CB8 (sub_166B78 trampoline return addr after calling sub_2DF1C)
+    #   frames[2-511]: luaD_precall+156 (FP chain loop artifact — not actual recursion)
+    #
+    # sub_2DF1C = Lua sleep() C function (polls sleep chunks, checks stop conditions).
+    # ESR = 0x56000080 "Address size fault", FAR = 0x786FE0000 (garbage from freed memory).
+    #
+    # CRASH MECHANISM (proven by IDA disasm of 0x2E2A8-0x2E2B8):
+    #   The sleep loop checks a stop condition by triple-dereferencing each iteration:
+    #     2e2ac: LDR X8, [SP,#0x190+var_140]  ; X8 = lua runner (wrapper object)
+    #     2e2b0: LDR X8, [X8]                  ; X8 = *(runner) = lua_State ptr
+    #     2e2b4: LDUR X8, [X8,#-8]             ; X8 = controller = *(lua_state - 8)
+    #     2e2b8: LDR X8, [X8]                  ; X8 = *controller → CRASH (use-after-free)
+    #   The automation controller (stored 8 bytes before lua_State) is freed mid-sleep
+    #   while the loop is sleeping (usleep 50ms chunks). On next iteration the check
+    #   re-derives the controller from the LIVE lua_state, finds the now-freed pointer,
+    #   and dereferences it → FAR = 0x786FE0000 (garbage from reclaimed memory).
+    #
+    # There is also a second risky path at 0x2E310+ using var_130 (controller pointer
+    # saved before loop start), which accesses controller[8] and controller[0] byte — same
+    # freed object, same crash risk.
+    #
+    # FIX — SC3a: B loc_2E2C4 at 0x2E2A8 (replace CBZ X8, loc_2E2C4 with unconditional B).
+    #   Original 0x2E2A8: CBZ X8, loc_2E2C4 → E8 00 00 B4.
+    #   Patch: B loc_2E2C4 → 07 00 00 14 (imm26=7, offset=0x1C → target 0x2E2C4).
+    #   Effect: Check 1 block (0x2E2AC-0x2E2B8) is never executed — no triple dereference.
+    #
+    # FIX — SC3b: B loc_2E3BC at 0x2E310 (replace LDR X8,[SP,#0x60] with unconditional B).
+    #   Original 0x2E310: LDR X8, [SP,#0x190+var_130] → E8 33 40 F9 (load controller ptr).
+    #   Patch: B loc_2E3BC → 2B 00 00 14 (imm26=0x2B=43, offset=0xAC → target 0x2E3BC).
+    #   Effect: Check 2 + inner "while paused" loop (0x2E310-0x2E3B8) is never executed.
+    #   0x2E3BC is the sleep-chunk dispatch (LDR remaining time → CMP → usleep → subtract).
+    #
+    # COMBINED EFFECT: The sleep loop still sleeps the correct total duration in 50ms chunks
+    # (0x2E3BC path is untouched), but stop-condition checks are skipped. Script cannot be
+    # interrupted mid-sleep() — it will sleep the full duration. Acceptable trade-off
+    # (behavioral: stop takes effect after the current sleep() call completes).
+    #
+    # No interaction with SC1/SC2 (screen capture thread patches). This is a pre-existing
+    # use-after-free in the automation controller lifecycle, not related to thread affinity.
+    # Verified original bytes at FAT+0x2D62A8: E8 00 00 B4 (CBZ X8, loc_2E2C4) ✓
+    # Verified original bytes at FAT+0x2D6310: E8 33 40 F9 (LDR X8,[SP,#0x60]) ✓
+
+    # SC3a — B loc_2E2C4 at sub_2DF1C 0x2E2A8 (FAT+0x2D62A8): skip Check 1 (triple-deref UAF)
+    (0x2D62A8, bytes.fromhex("07000014"),
+     "arm64e sub_2DF1C 0x2E2A8 CBZ X8→B loc_2E2C4 (orig E80000B4): skip Check 1 stop-cond "
+     "in sleep loop; Check 1 triple-derefs controller ptr (lua_state-8) which is freed mid-sleep "
+     "→ FAR=0x786FE0000 Address size fault; B makes check unconditionally skipped [v1.5.3-51]"),
+
+    # SC3b — B loc_2E3BC at sub_2DF1C 0x2E310 (FAT+0x2D6310): skip Check 2 + inner pause loop
+    (0x2D6310, bytes.fromhex("2B000014"),
+     "arm64e sub_2DF1C 0x2E310 LDR X8→B loc_2E3BC (orig E83340F9): skip Check 2 (var_130 "
+     "controller[8] deref) and inner 'while paused' loop; var_130 holds same freed controller "
+     "ptr — accessing controller[8]/[0] would crash; B jumps to sleep-chunk dispatch at 0x2E3BC "
+     "so loop still sleeps full duration in 50ms chunks [v1.5.3-51]"),
+
 ]
 
 # v1.5.3-46 external-only policy. Keep the table above as analysis history,
@@ -1105,6 +1165,11 @@ EXTERNAL_ONLY_PATCH_OFFSETS = frozenset({
     #               0x1AEA50 (mid-stub, skipped ADRL X17), causing PAC auth fail → safe mode.
     # SC2  0x7EBC8: NOP TBZ in ws_lua_capture_screen → always call sub_7ECF4 directly on caller thread.
     0x35E6A4, 0x326BC8,
+
+    # v1.5.3-51: Lua sleep() use-after-free fix — stop-condition checks dereference freed controller.
+    # SC3a 0x2E2A8: CBZ X8→B loc_2E2C4 in sub_2DF1C sleep loop — skip Check 1 (triple-deref UAF).
+    # SC3b 0x2E310: LDR X8→B loc_2E3BC in sub_2DF1C sleep loop — skip Check 2 + inner pause loop.
+    0x2D62A8, 0x2D6310,
 })
 
 _all_patch_offsets = {offset for offset, _, _ in PATCHES}
@@ -1494,8 +1559,8 @@ def patch_dylib(raw):
         n = len(patch)
         before = bytes(data[offset:offset+n])
         # sanity checks for arm64e patches
-        if "arm64e" in label and "CBZ" in label:
-            # verify CBZ W8 at this location (original 68 00 00 34)
+        if "arm64e" in label and "CBZ W8" in label:
+            # verify CBZ W8 (32-bit) at this location (original 68 00 00 34)
             assert before == bytes.fromhex("68000034"), \
                 f"Expected CBZ W8 (68 00 00 34) at FAT+0x{offset:X}, got {before.hex()}"
         data[offset:offset+n] = patch
@@ -1581,7 +1646,7 @@ def main():
         lines = []
         for line in c_fd[ctrl_key].decode().splitlines():
             if line.startswith("Version:"):
-                lines.append("Version: 1.5.3-50+external-only")
+                lines.append("Version: 1.5.3-51+external-only")
             elif line.startswith("Depends:"):
                 val = line.rstrip()
                 if "oldabi" not in val:
@@ -1590,7 +1655,7 @@ def main():
             else:
                 lines.append(line)
         c_over[ctrl_key] = ("\n".join(lines) + "\n").encode()
-        print("Updated control: Version 1.5.3-50+external-only, oldabi in Depends, postinst original")
+        print("Updated control: Version 1.5.3-51+external-only, oldabi in Depends, postinst original")
     # postinst: keep original; signing is done in-patcher by _resign_slice (Python SHA-256)
 
     new_ctrl_tar = write_tar_gz(c_mem, c_fd, c_over)
