@@ -1,3 +1,64 @@
+Package: com.nvfrk.rh.iOSAutomate
+Name: iOSAutomate
+Description: Simple and optimized!
+ All in ~1 MB file size and ~3 MB on disk.
+  - ⭕ BIG UPDATE: MCP got a brain. Master Prompt. New tools. It knows what you want before you do !
+ - Add Store Scripts with multiple badges: Free, Paid, Your Scripts, and App filter.
+ - Add clearLocation, fakeLocation function to change system-wide location.
+ - Add support set proxy with format: ip:port:user:pwd
+ - Add support api to run stop_running, start_running .ate, .lua, .fna file.
+ - Add update for appInfo, table.tostring and optimize CPU,RAM for launching app.
+ - Add modern dialog - intelligent for tool UI, best for code sell tool to others.
+ - Add async(function_name), stop() - for main thread, stopAsync(), stopAll().
+ - Add strip fnrr for old-system CloudiPhone.
+ - Add support socket.http,ssl & ltn12, wget, curl with best performance.
+ - Add smart indicator for image path and region in script with real-time preview.
+ - Add real-time RAM, CPU, and storage stats overlay for script performance monitoring.
+ - Add support for all Plus models (rarely used in farm setups).
+ - Add ZOMBIE MODE for Big Farm, as CloudiPhone.
+ - Add optimize and support both LUA 5.3 & 5.4.
+ - Add speedup & optimize for ORC, findImage.
+ - ⭕ BIG UPDATE: MCP with more POWERFULL, AI Agentic can see anything !
+ - Add 2 button: findText, tapText to OCR helper.
+ - Add update AI PROMPT with more function & MCP config guide for AI agentic.
+ - Add CleanAllAcc(bundle_id), deleteAcc(bundle_id,accname) - BE CAREFUL TO USE !
+ - Add new method for get Cookie/token (EXTRA-Paid)
+ - Add Dark/Light toggle to top of IDE.
+ - Add module system: require() now resolves correctly.
+ - Add one-click Backup button in Web IDE: exports all scripts as a timestamped zip.
+ - Add multi-method input pipeline for text injection.
+ - Add User-defined output directory for image crop (findImage).
+ - ⭕ BIG UPDATE (BASIC-Paid): resetApp(bundleID), openAcc(bundleID, accname), restoreAcc(bundleID, accname), backupAcc(bundleID, accname). With these functions you can farm iOS for feeding bulk accounts (only need openAcc() func) or register accounts (with feeding after that if you want).
+ - Add more functions and APIs.
+ - add OpeniOSAutomate(tab_index), CloseiOSAutomate() for floating button.
+ - Add MCP server (SSE) for AI agent at localIP:port/sse (self-setup, no author support).
+ - Add current line indicator for autolaunch script.
+ - Add more detail for changelog.
+ - Add execute('reboot').
+ - Add check key active online/offline.
+ - Add syntax check in realtime.
+ - Add getCookie(): cookie-token.
+ - Add AI Prompt, Apps button in IDE.
+ - Add all helpers: coord, getColor, findColor(s),
+   findImage, OCR, Zoom.
+ - Add floating button on phone, no need PC/browser.
+ - Add 20+ local APIs, supports port-forward for farms.
+ - Initial release: over 60 functions & IDE (PC/Mobile).
+Maintainer: fn
+Depiction: https://kiiimrepo.com/repo/SileoDepic.php?info=iOSAutomate_1.5.3-3_iphoneos-arm64e
+SileoDepiction: https://kiiimrepo.com/repo/SileoDepic.php?info=iOSAutomate_1.5.3-3_iphoneos-arm64e
+Author: nvfrk
+Section: roothide
+Depends: ellekit, rootless-compat, zip, unzip, ldid, oldabi
+Architecture: iphoneos-arm64e
+Version: 1.5.3-53+external-only
+Installed-Size: 5832
+Filename: pool/com.fn.rh.iOSAutomate_poc-1.5.3-53-external-only-roothide-iphoneos-arm64e.deb
+Size: 2489020
+MD5sum: e15f968b1d63f47b14eda7760e16eb3f
+SHA1: 3e9d666b7dfb3635cd27efa3c0a9e94b8478cce3
+SHA256: a494f49fd8e413bb7c6f1c77124dfc3534d3a9bcc4b4d8ccb50d6ddc0a3d7dd5
+
 Package: com.nvfrk.rl.Remote
 Name: Remote
 Description: fn [PoC]
